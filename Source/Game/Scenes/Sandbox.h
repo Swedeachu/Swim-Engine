@@ -93,6 +93,10 @@ namespace Game
 		// Buoyant boxes, balls and capsule figures thrown onto the wave water around a point.
 		void SpawnFloaters(std::uint32_t count, glm::vec3 around);
 
+		// A field of crossed, alpha-tested, two-sided pixel-art flower cards from 8 m to `far` m
+		// along the view (clear texels white, the worst case for mip bleed and specular).
+		void SpawnCutouts(float far);
+
 		BallShooter* GetShooter() const;
 
 		// Lighting.

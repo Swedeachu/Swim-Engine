@@ -88,7 +88,7 @@ static_assert(Swim::Render::PostHistogramBins == 256 && Swim::Render::MaxBloomMi
 static_assert(!std::is_copy_constructible_v<Swim::Render::PostProcessor>);
 static_assert(sizeof(Swim::Render::TemporalResolveConstants) == 32 && Swim::Render::TemporalResolveBindings::Count == 5);
 static_assert(!std::is_copy_constructible_v<Swim::Render::TemporalAntiAliasing>);
-static_assert(sizeof(Swim::Render::ForwardViewRecord) == 208);
+static_assert(sizeof(Swim::Render::ForwardViewRecord) == 288);
 static_assert(Swim::Render::ForwardPlusRenderer::VelocityFormat == Swim::Rhi::Format::RG16Float);
 static_assert(Swim::Render::ForwardPlusRenderer::NormalFormat == Swim::Rhi::Format::RGBA16Float &&
 	Swim::Render::ForwardPlusRenderer::IndirectFormat == Swim::Rhi::Format::RGBA16Float);

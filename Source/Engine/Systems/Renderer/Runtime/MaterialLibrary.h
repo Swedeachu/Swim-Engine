@@ -49,6 +49,8 @@ namespace Engine
 		bool PointSampled = false; // Nearest texel filtering (pixel art); mips still blend.
 		float OcclusionStrength = 1.0f;
 		float NormalScale = 1.0f;
+		// Enchanted-style sheen (RenderSettings::Glint): 0 none, 1 full; e.g. lower for armour.
+		float Glint = 0.0f;
 		Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> BaseColorTexture;
 		Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> MetallicRoughnessTexture;
 		Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> NormalTexture;
@@ -75,6 +77,13 @@ namespace Engine
 
 		// The router is called for every existing and future set (and again on changes).
 		void SetRouter(Router router);
+
+		// Maps a material's texture handle to the asset to sample (MeshLibrary::Resolve, so a
+		// texture registered again under its name never leaves materials on the fallback).
+		using TextureResolver =
+			std::function<Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>(Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>)>;
+
+		void SetTextureResolver(TextureResolver resolver) { textureResolver = std::move(resolver); }
 
 		// Returns the material set index (the GPU Scene's MaterialSet).
 		std::uint32_t Create(const MaterialDesc& desc);
@@ -121,6 +130,7 @@ namespace Engine
 		std::uint32_t sampler = 0;
 		std::uint32_t pointSampler = 0;
 		Router router;
+		TextureResolver textureResolver;
 		std::unordered_map<std::uint32_t, Entry> entries;
 		std::uint32_t defaultSet = 0;
 

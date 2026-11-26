@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <span>
 #include <stdexcept>
 
 namespace Swim::Render
@@ -46,6 +47,140 @@ namespace Swim::Render
 
 	} // namespace
 
+	namespace
+	{
+
+		// Indices of up to MaxParticleCurveKeys keys of a piecewise-linear curve in `dims`
+		// channels: the ends, then greedily the key farthest from the curve through the chosen.
+		std::vector<std::size_t> FitKeys(std::span<const float> times, std::span<const float> values, std::size_t dims)
+		{
+			const std::size_t n = times.size();
+			std::vector<std::size_t> kept;
+
+			if (n == 0)
+			{
+				return kept;
+			}
+
+			kept.push_back(0);
+
+			if (n > 1)
+			{
+				kept.push_back(n - 1);
+			}
+
+			while (kept.size() < std::min<std::size_t>(n, MaxParticleCurveKeys))
+			{
+				std::sort(kept.begin(), kept.end());
+				std::size_t best = n;
+				float worst = -1.0f;
+
+				for (std::size_t i = 1; i + 1 < n; ++i)
+				{
+					if (std::find(kept.begin(), kept.end(), i) != kept.end())
+					{
+						continue;
+					}
+
+					const auto after = std::upper_bound(kept.begin(), kept.end(), i);
+					const std::size_t a = *(after - 1);
+					const std::size_t b = *after;
+					const float span = times[b] - times[a];
+					const float f = span > 0.0f ? (times[i] - times[a]) / span : 0.0f;
+					float error = 0.0f;
+
+					for (std::size_t c = 0; c < dims; ++c)
+					{
+						const float line = values[a * dims + c] + (values[b * dims + c] - values[a * dims + c]) * f;
+						error = std::max(error, std::abs(values[i * dims + c] - line));
+					}
+
+					if (error > worst)
+					{
+						worst = error;
+						best = i;
+					}
+				}
+
+				if (best == n)
+				{
+					break;
+				}
+
+				kept.push_back(best);
+			}
+
+			std::sort(kept.begin(), kept.end());
+			return kept;
+		}
+
+		// Times clamped to [0, 1] and nudged to increase strictly.
+		std::array<float, MaxParticleCurveKeys> FittedTimes(std::span<const float> times, const std::vector<std::size_t>& kept)
+		{
+			std::array<float, MaxParticleCurveKeys> out{ 0, 1, 1, 1 };
+
+			for (std::size_t k = 0; k < kept.size(); ++k)
+			{
+				const float t = std::clamp(Finite(times[kept[k]]) ? times[kept[k]] : 0.0f, 0.0f, 1.0f);
+				out[k] = k > 0 ? std::max(t, std::nextafter(out[k - 1], 2.0f)) : t;
+			}
+
+			return out;
+		}
+
+	} // namespace
+
+	ParticleCurve ParticleCurve::FromKeys(std::span<const float> times, std::span<const float> values)
+	{
+		ParticleCurve curve;
+		const std::size_t n = std::min(times.size(), values.size());
+
+		if (n == 0)
+		{
+			return curve;
+		}
+
+		const auto kept = FitKeys(times.first(n), values.first(n), 1);
+		curve.KeyCount = static_cast<std::uint32_t>(kept.size());
+		curve.Times = FittedTimes(times, kept);
+
+		for (std::size_t k = 0; k < MaxParticleCurveKeys; ++k)
+		{
+			curve.Values[k] = values[kept[std::min(k, kept.size() - 1)]];
+		}
+
+		return curve;
+	}
+
+	ParticleGradient ParticleGradient::FromKeys(std::span<const float> times, std::span<const std::array<float, 4>> colors)
+	{
+		ParticleGradient gradient;
+		const std::size_t n = std::min(times.size(), colors.size());
+
+		if (n == 0)
+		{
+			return gradient;
+		}
+
+		std::vector<float> flat;
+
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			flat.insert(flat.end(), colors[i].begin(), colors[i].end());
+		}
+
+		const auto kept = FitKeys(times.first(n), flat, 4);
+		gradient.KeyCount = static_cast<std::uint32_t>(kept.size());
+		gradient.Times = FittedTimes(times, kept);
+
+		for (std::size_t k = 0; k < MaxParticleCurveKeys; ++k)
+		{
+			gradient.Colors[k] = colors[kept[std::min(k, kept.size() - 1)]];
+		}
+
+		return gradient;
+	}
+
 	void ValidateParticleEmitterDesc(const ParticleEmitterDesc& desc)
 	{
 		if (desc.Capacity < 1 || (desc.Blend == ParticleBlendMode::AlphaBlend && desc.Capacity > MaxSortedParticles))
@@ -66,9 +201,20 @@ namespace Swim::Render
 			}
 		}
 
-		if (desc.Shape != ParticleShape::Point && desc.Shape != ParticleShape::Sphere && desc.Shape != ParticleShape::Box)
+		if (desc.Shape != ParticleShape::Point && desc.Shape != ParticleShape::Sphere && desc.Shape != ParticleShape::Box &&
+			desc.Shape != ParticleShape::Disc)
 		{
 			throw std::invalid_argument("unknown particle spawn shape");
+		}
+
+		if (static_cast<std::uint32_t>(desc.DirectionMode) > 2 || static_cast<std::uint32_t>(desc.Facing) > ParticleFacingEmitter)
+		{
+			throw std::invalid_argument("unknown particle direction mode or facing");
+		}
+
+		if (!Finite(desc.Stretch) || desc.Stretch < 0.0f || !Range(desc.AspectMin, desc.AspectMax) || desc.AspectMin <= 0.0f)
+		{
+			throw std::invalid_argument("particle stretch must be >= 0 and the aspect range finite and > 0");
 		}
 
 		if (!AllFinite(desc.ShapeExtent) || desc.ShapeExtent[0] < 0.0f || desc.ShapeExtent[1] < 0.0f || desc.ShapeExtent[2] < 0.0f)
@@ -138,6 +284,11 @@ namespace Swim::Render
 			throw std::invalid_argument("particle UV rects must lie in [0, 1] with u0 < u1 and v0 < v1");
 		}
 
+		if (static_cast<std::uint32_t>(desc.Material) >= ParticleMaterialCount)
+		{
+			throw std::invalid_argument("unknown particle material");
+		}
+
 		if ((desc.TextureIndex == 0) != (desc.SamplerIndex == 0))
 		{
 			throw std::invalid_argument("a particle sprite needs both a texture and a sampler index (or neither)");
@@ -169,6 +320,7 @@ namespace Swim::Render
 		e.Drag = desc.Drag;
 		e.Shape = desc.Shape == ParticleShape::Sphere ? ParticleShapeSphere
 			: desc.Shape == ParticleShape::Box		  ? ParticleShapeBox
+			: desc.Shape == ParticleShape::Disc		  ? ParticleShapeDisc
 													  : ParticleShapePoint;
 		e.CosConeAngle = std::cos(desc.ConeAngle);
 		e.SpeedMin = desc.SpeedMin;
@@ -186,7 +338,15 @@ namespace Swim::Render
 		e.Friction = desc.Friction;
 		e.Flags = (desc.Space == ParticleSpace::Local ? ParticleFlagLocalSpace : 0u) | (desc.Collision ? ParticleFlagCollision : 0u) |
 			(desc.Blend == ParticleBlendMode::AlphaBlend ? ParticleFlagSorted : 0u) | (desc.TextureIndex != 0 ? ParticleFlagTextured : 0u) |
-			(desc.RandomFrame ? ParticleFlagRandomFrame : 0u);
+			(desc.RandomFrame ? ParticleFlagRandomFrame : 0u) | (desc.SurfaceOnly ? ParticleFlagSurface : 0u) |
+			(desc.DirectionMode == ParticleDirection::Outward ? ParticleFlagOutward : 0u) |
+			(desc.DirectionMode == ParticleDirection::Inward ? ParticleFlagInward : 0u) |
+			(desc.Collision && desc.ExpireOnContact ? ParticleFlagExpireOnContact : 0u) |
+			(desc.FlipbookLoop ? 0u : ParticleFlagFlipbookClamp) | (static_cast<std::uint32_t>(desc.Material) << ParticleFlagMaterialShift);
+		e.Facing = static_cast<std::uint32_t>(desc.Facing);
+		e.Stretch = desc.Stretch;
+		e.AspectMin = desc.AspectMin;
+		e.AspectMax = desc.AspectMax;
 		e.FirstSlot = firstSlot;
 		e.Capacity = desc.Capacity;
 		e.SpawnCount = std::min(spawnCount, desc.Capacity);
@@ -410,10 +570,11 @@ namespace Swim::Render::Particles
 		}
 
 		Float3 position{ 0, 0, 0 };
+		const bool surface = (e.Flags & ParticleFlagSurface) != 0;
 
 		if (e.Shape == ParticleShapeSphere)
 		{
-			const float radius = e.ShapeExtent[0] * std::pow(random(4), 1.0f / 3.0f);
+			const float radius = e.ShapeExtent[0] * (surface ? 1.0f : std::pow(random(4), 1.0f / 3.0f));
 			const float z = 2.0f * random(5) - 1.0f;
 			const float ring = std::sqrt(std::max(0.0f, 1.0f - z * z));
 			const float angle = 2.0f * Pi * random(6);
@@ -421,9 +582,42 @@ namespace Swim::Render::Particles
 		}
 		else if (e.Shape == ParticleShapeBox)
 		{
+			Float3 unit{};
+
 			for (int c = 0; c < 3; ++c)
 			{
-				position[c] = e.ShapeExtent[c] * (2.0f * random(4 + std::uint32_t(c)) - 1.0f);
+				unit[c] = 2.0f * random(4 + std::uint32_t(c)) - 1.0f;
+			}
+
+			if (surface)
+			{
+				// Out to the face of the largest coordinate.
+				const int axis = std::abs(unit[0]) >= std::abs(unit[1]) && std::abs(unit[0]) >= std::abs(unit[2]) ? 0
+					: std::abs(unit[1]) >= std::abs(unit[2])													  ? 1
+																												  : 2;
+				unit[axis] = unit[axis] < 0.0f ? -1.0f : 1.0f;
+			}
+
+			for (int c = 0; c < 3; ++c)
+			{
+				position[c] = e.ShapeExtent[c] * unit[c];
+			}
+		}
+		else if (e.Shape == ParticleShapeDisc)
+		{
+			const float radius = e.ShapeExtent[0] * (surface ? 1.0f : std::sqrt(random(4)));
+			const float angle = 2.0f * Pi * random(6);
+			position = { radius * std::cos(angle), 0.0f, radius * std::sin(angle) };
+		}
+
+		if ((e.Flags & (ParticleFlagOutward | ParticleFlagInward)) != 0)
+		{
+			const float length = std::sqrt(position[0] * position[0] + position[1] * position[1] + position[2] * position[2]);
+			const float signedSpeed = (e.Flags & ParticleFlagInward) != 0 ? -speed : speed;
+
+			for (int c = 0; c < 3; ++c)
+			{
+				velocity[c] = (length > 1.0e-6f ? position[c] / length : d[c]) * signedSpeed;
 			}
 		}
 
@@ -468,6 +662,11 @@ namespace Swim::Render::Particles
 
 		if ((e.Flags & ParticleFlagCollision) != 0 && p.Position[1] < e.GroundHeight)
 		{
+			if ((e.Flags & ParticleFlagExpireOnContact) != 0)
+			{
+				return false;
+			}
+
 			p.Position[1] = e.GroundHeight;
 
 			if (p.Velocity[1] < 0.0f)
@@ -529,7 +728,8 @@ namespace Swim::Render::Particles
 
 		if (e.FlipbookFrameRate > 0.0f)
 		{
-			return static_cast<std::uint32_t>(std::floor(p.Age * e.FlipbookFrameRate)) % frames;
+			const auto frame = static_cast<std::uint32_t>(std::floor(p.Age * e.FlipbookFrameRate));
+			return (e.Flags & ParticleFlagFlipbookClamp) != 0 ? std::min(frame, frames - 1) : frame % frames;
 		}
 
 		return std::min(static_cast<std::uint32_t>(std::floor(NormalizedAge(p) * float(frames))), frames - 1);
@@ -553,11 +753,83 @@ namespace Swim::Render::Particles
 		return depthA > depthB || (depthA == depthB && idA < idB);
 	}
 
+	BillboardAxes ParticleBillboardAxes(const GpuParticleFrame& frame, const GpuParticleEmitter& e, const GpuParticle& p)
+	{
+		BillboardAxes axes;
+		const float size = ParticleSize(e, p);
+		axes.HalfWidth = 0.5f * size;
+		axes.HalfHeight = 0.5f * size * Lerp(e.AspectMin, e.AspectMax, Random(p.Id, e.Seed, 11));
+		axes.Right = { frame.CameraRight[0], frame.CameraRight[1], frame.CameraRight[2] };
+		axes.Up = { frame.CameraUp[0], frame.CameraUp[1], frame.CameraUp[2] };
+		const auto center = WorldPosition(e, p);
+		const Float3 toCamera{ frame.CameraPosition[0] - center[0], frame.CameraPosition[1] - center[1],
+			frame.CameraPosition[2] - center[2] };
+		const auto normalize = [](const Float3& v, Float3& out)
+		{
+			const float length = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+
+			if (!(length > 1.0e-6f))
+			{
+				return false;
+			}
+
+			out = { v[0] / length, v[1] / length, v[2] / length };
+			return true;
+		};
+		const auto cross = [](const Float3& a, const Float3& b)
+		{
+			return Float3{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+		};
+
+		if (e.Facing == ParticleFacingVelocity)
+		{
+			Float3 velocity{ p.Velocity[0], p.Velocity[1], p.Velocity[2] };
+			velocity = (e.Flags & ParticleFlagLocalSpace) != 0 ? TransformVector(e.Transform, velocity) : velocity;
+			const float speed = std::sqrt(velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2]);
+			Float3 up{}, right{};
+
+			if (normalize(velocity, up) && normalize(cross(up, toCamera), right))
+			{
+				axes.Up = up;
+				axes.Right = right;
+				axes.HalfHeight *= 1.0f + e.Stretch * speed;
+			}
+		}
+		else if (e.Facing == ParticleFacingUprightY)
+		{
+			Float3 right{};
+
+			if (normalize(cross({ 0.0f, 1.0f, 0.0f }, toCamera), right))
+			{
+				axes.Up = { 0.0f, 1.0f, 0.0f };
+				axes.Right = right;
+			}
+		}
+		else if (e.Facing == ParticleFacingHorizontal)
+		{
+			axes.Right = { 1.0f, 0.0f, 0.0f };
+			axes.Up = { 0.0f, 0.0f, -1.0f };
+		}
+		else if (e.Facing == ParticleFacingEmitter)
+		{
+			Float3 right{}, up{};
+
+			if (normalize({ e.Transform[0], e.Transform[4], e.Transform[8] }, right) &&
+				normalize({ e.Transform[1], e.Transform[5], e.Transform[9] }, up))
+			{
+				axes.Right = right;
+				axes.Up = up;
+			}
+		}
+
+		return axes;
+	}
+
 	BillboardVertex BillboardCorner(const GpuParticleFrame& frame, const GpuParticleEmitter& e, const GpuParticle& p, std::uint32_t corner)
 	{
 		const float ox = (corner & 1u) != 0 ? 1.0f : -1.0f;
 		const float oy = (corner & 2u) != 0 ? 1.0f : -1.0f;
-		const float half = 0.5f * ParticleSize(e, p);
+		const auto axes = ParticleBillboardAxes(frame, e, p);
 		const float c = std::cos(p.Rotation);
 		const float s = std::sin(p.Rotation);
 		const auto center = WorldPosition(e, p);
@@ -565,9 +837,9 @@ namespace Swim::Render::Particles
 
 		for (int k = 0; k < 3; ++k)
 		{
-			const float right = frame.CameraRight[k] * c + frame.CameraUp[k] * s;
-			const float up = frame.CameraUp[k] * c - frame.CameraRight[k] * s;
-			vertex.Position[k] = center[k] + (right * ox + up * oy) * half;
+			const float right = axes.Right[k] * c + axes.Up[k] * s;
+			const float up = axes.Up[k] * c - axes.Right[k] * s;
+			vertex.Position[k] = center[k] + right * ox * axes.HalfWidth + up * oy * axes.HalfHeight;
 		}
 
 		const std::uint32_t index = FlipbookFrame(e, p);

@@ -44,6 +44,9 @@ namespace Engine
 		GraphicsBackend Graphics{ GraphicsBackend::Auto };
 		PhysicsBackend Physics{ PhysicsBackend::Auto };
 		Swim::Platform::WindowDesc Window{};
+		// Given on the command line: these win over the saved window_mode / window_display for the run.
+		bool WindowModeGiven = false;
+		bool DisplayGiven = false;
 		PresentMode Present{ PresentMode::Window };
 		// One of Playing, Paused or Stopped.
 		EngineState InitialState{ EngineState::Playing };

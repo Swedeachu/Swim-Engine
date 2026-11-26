@@ -84,10 +84,13 @@ namespace Engine
 
 		RenderExtractorDesc desc;
 		desc.Scene = sceneId;
-		desc.ResolveMesh = [&residency = renderer.GetResidency()](Swim::Assets::AssetHandle<Swim::Assets::MeshAsset> mesh)
+		desc.ResolveMesh = [&residency = renderer.GetResidency(), &meshes = renderer.GetMeshes()](
+							   Swim::Assets::AssetHandle<Swim::Assets::MeshAsset> mesh)
 		{
-			return residency.ResolveRenderMesh(mesh);
+			// A mesh registered again under its name replaces the one components still hold.
+			return residency.ResolveRenderMesh(meshes.Resolve(mesh));
 		};
+		meshReplacements = renderer.GetMeshes().GetMeshReplacements();
 		desc.WorldTransform = MakeTransformWorldSource();
 		Scene* owner = scene;
 		desc.ObjectId = [owner](const entt::registry&, entt::entity entity)
@@ -211,6 +214,12 @@ namespace Engine
 
 		if (extractor)
 		{
+			if (const auto replacements = renderer.GetMeshes().GetMeshReplacements(); replacements != meshReplacements)
+			{
+				meshReplacements = replacements;
+				extractor->RefreshMeshes();
+			}
+
 			extraction = extractor->Extract(renderer.GetLastCompletion());
 		}
 

@@ -28,11 +28,25 @@ namespace Swim::Render
 	inline constexpr std::uint32_t ParticleFlagSorted = 1u << 2; // Alpha-blended: back-to-front draw list.
 	inline constexpr std::uint32_t ParticleFlagTextured = 1u << 3;
 	inline constexpr std::uint32_t ParticleFlagRandomFrame = 1u << 4;
+	inline constexpr std::uint32_t ParticleFlagSurface = 1u << 5;
+	inline constexpr std::uint32_t ParticleFlagOutward = 1u << 6;
+	inline constexpr std::uint32_t ParticleFlagInward = 1u << 7;
+	inline constexpr std::uint32_t ParticleFlagExpireOnContact = 1u << 8;
+	inline constexpr std::uint32_t ParticleFlagFlipbookClamp = 1u << 9;
+	inline constexpr std::uint32_t ParticleFlagMaterialShift = 12; // ParticleMaterial in bits 12..15.
+
+	// ParticleFacing as packed.
+	inline constexpr std::uint32_t ParticleFacingCamera = 0;
+	inline constexpr std::uint32_t ParticleFacingVelocity = 1;
+	inline constexpr std::uint32_t ParticleFacingUprightY = 2;
+	inline constexpr std::uint32_t ParticleFacingHorizontal = 3;
+	inline constexpr std::uint32_t ParticleFacingEmitter = 4;
 
 	// ParticleShape as packed.
 	inline constexpr std::uint32_t ParticleShapePoint = 0;
 	inline constexpr std::uint32_t ParticleShapeSphere = 1;
 	inline constexpr std::uint32_t ParticleShapeBox = 2;
+	inline constexpr std::uint32_t ParticleShapeDisc = 3;
 
 	// One emitter row, uploaded every frame (spawn counts and the transform change).
 	struct GpuParticleEmitter
@@ -68,9 +82,13 @@ namespace Swim::Render
 		float ColorTimes[4] = { 0, 1, 1, 1 };
 		float ColorValues[16] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }; // RGBA per key.
 		float UvRect[4] = { 0, 0, 1, 1 };
+		std::uint32_t Facing = ParticleFacingCamera;
+		float Stretch = 0.0f;
+		float AspectMin = 1.0f;
+		float AspectMax = 1.0f;
 	};
 
-	static_assert(sizeof(GpuParticleEmitter) == 336);
+	static_assert(sizeof(GpuParticleEmitter) == 352);
 	static_assert(offsetof(GpuParticleEmitter, Friction) == 144 && offsetof(GpuParticleEmitter, SizeTimes) == 208);
 
 	// Per-emitter counters (std430 uint4).

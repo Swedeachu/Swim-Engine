@@ -13,5 +13,5 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	Output[id.x] = material.BaseColorFactor + float4(material.EmissiveFactor, material.MetallicFactor) +
 		float4(material.RoughnessFactor, material.NormalScale, material.OcclusionStrength, material.AlphaCutoff) +
 		float4(float(material.BaseColorTexture + material.MetallicRoughnessTexture + material.NormalTexture),
-			float(material.OcclusionTexture + material.EmissiveTexture), float(material.MaterialSampler), float(material.Flags + material.Reserved));
+			float(material.OcclusionTexture + material.EmissiveTexture), float(material.MaterialSampler), float(material.Flags) + material.GlintIntensity);
 }

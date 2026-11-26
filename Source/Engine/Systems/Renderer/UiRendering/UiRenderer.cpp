@@ -142,6 +142,9 @@ namespace Swim::Render
 		const auto constants = world ? Ui::BuildCanvasDrawConstants(width, height, frame.Composition, *frame.ClipFromCanvas, frame.Opacity)
 									 : Ui::BuildDrawConstants(width, height, frame.Composition, frame.Opacity);
 
+		auto constantsWithGlint = constants;
+		constantsWithGlint.Glint[0] = std::isfinite(frame.Glint.Time) ? frame.Glint.Time : 0.0f;
+		constantsWithGlint.Glint[1] = float(frame.Glint.Sampler);
 		Ui::QuadBuildDesc build;
 		build.DpiScale = frame.DpiScale;
 		build.OffsetX = frame.OffsetX;
@@ -155,9 +158,11 @@ namespace Swim::Render
 			build.AtlasPointSampler = frame.Atlas->PointSamplerIndex;
 		}
 
+		build.Glint = &frame.Glint;
+
 		Ui::QuadBuildStats built;
 		lastQuads = Ui::BuildQuads(frame.Paint, build, &built);
-		lastConstants = constants;
+		lastConstants = constantsWithGlint;
 		const auto runs = Ui::BuildDrawRuns(lastQuads);
 		stats = { static_cast<std::uint32_t>(lastQuads.size()), built.Solids, built.Glyphs, built.Images, built.Culled,
 			static_cast<std::uint32_t>(runs.size()) };
@@ -233,10 +238,9 @@ namespace Swim::Render
 				{
 					b.Read(texture, S::ShaderRead);
 				}
-
 			},
-			[program, label = name + " draw", target, depth, quads, clear, clearColor, constants, count, runs, bindlessTable = &bindless,
-				width, height, format, mip](RenderCommandContext& c)
+			[program, label = name + " draw", target, depth, quads, clear, clearColor, constants = constantsWithGlint, count, runs,
+				bindlessTable = &bindless, width, height, format, mip](RenderCommandContext& c)
 			{
 				Rhi::TextureViewDesc colorView;
 				colorView.PixelFormat = format;

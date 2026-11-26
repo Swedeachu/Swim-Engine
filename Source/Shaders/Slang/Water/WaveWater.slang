@@ -18,6 +18,7 @@ struct WaveWaterParams
 	float4 Scattering; // rgb, w: refraction.
 	float4 Viewport;   // xy: pixels, z: ripple strength, w: max reflection steps.
 	WaterWaveGpu Waves[WaterMaxWaves];
+	DistanceFog Fog; // Self-applied fog (off with the scene fog).
 };
 
 [[vk::binding(0, 2)]] StructuredBuffer<WaveWaterParams> Params;
@@ -185,7 +186,7 @@ ForwardTransparentTargets fragmentMain(VertexOutput input)
 	scene.Sampler = SceneSampler;
 	scene.Size = p.Viewport.xy;
 	ForwardLighting lit;
-	lit.Radiance = WaterShade(surface, optics, scene);
+	lit.Radiance = WaterShade(surface, optics, scene, p.Fog);
 	if (p.Lod.Fade2.w > 0.0)
 	{
 		const float3 tint = input.Rest.y > 0.5 ? float3(0.1, 0.2, 1.0) : lerp(float3(0.1, 1.0, 0.2), float3(1.0, 0.15, 0.1), lod.Detail * lod.Amplitude);

@@ -28,7 +28,7 @@ struct UiDrawConstants
 	float WhiteScale;
 	uint Flags;
 	float Opacity;
-	float2 Reserved;
+	float2 Glint; // UiQuadImageGlint: time (s), bindless repeating sampler index.
 };
 
 static const uint UiDrawWorld = 1u;
@@ -37,6 +37,8 @@ static const uint UiQuadSolid = 0u;
 static const uint UiQuadGlyph = 1u;
 static const uint UiQuadImage = 2u;
 static const uint UiQuadColorGlyph = 3u;
+static const uint UiQuadImageGlint = 4u;
+static const uint UiQuadGradient = 5u;
 
 static const uint UiEncodingSrgb = 0u;
 static const uint UiEncodingLinear = 1u;

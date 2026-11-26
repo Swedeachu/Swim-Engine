@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace Swim::Render
@@ -28,7 +29,42 @@ namespace Swim::Render
 		Point,
 		Sphere, // Uniform in a ball of radius ShapeExtent[0].
 		Box,	// Uniform in the box of half extents ShapeExtent.
+		Disc,	// Uniform in the disc of radius ShapeExtent[0] in the emitter's XZ plane.
 	};
+
+	// Where spawn velocities point.
+	enum class ParticleDirection : std::uint8_t
+	{
+		Cone,	 // Within ConeAngle of Direction.
+		Outward, // Away from the shape's centre (Direction for a particle spawned at the centre).
+		Inward,	 // Toward the shape's centre.
+	};
+
+	// How the quad is oriented. Rotation turns it in its own plane in every mode.
+	enum class ParticleFacing : std::uint8_t
+	{
+		Camera,		// Parallel to the screen.
+		Velocity,	// Long axis along the velocity, turned toward the camera (sparks, rain); Stretch lengthens it.
+		UprightY,	// Stands upright and turns about world Y toward the camera (smoke columns, grass tufts).
+		Horizontal, // Lies flat, facing up (ripples, decals on the ground).
+		Emitter,	// In the emitter's XY plane (portals, shockwave rings).
+	};
+
+	// How each billboard is shaded. Sprite is the plain look (texture * color, or a soft disc);
+	// the rest are procedural VFX shapes tinted by the color gradient, which may be HDR (rgb > 1)
+	// so bloom picks the hot parts up.
+	enum class ParticleMaterial : std::uint8_t
+	{
+		Sprite,
+		Soft,  // A smooth volumetric puff (Gaussian falloff with a little noise).
+		Fire,  // A flickering flame tongue that erodes over its life, hottest at the core.
+		Smoke, // A billowing puff lit from above, eroding as it fades.
+		Spark, // A white-hot core with a coloured falloff; use Velocity facing for streaks.
+		Glow,  // A wide halo, for light around bright particles.
+		Ring,  // A thin ring at the quad's edge (shockwaves); thins over its life.
+	};
+
+	inline constexpr std::uint32_t ParticleMaterialCount = 7;
 
 	// A scalar over a particle's normalized age t = age / lifetime: piecewise linear
 	// through up to four keys, constant before the first and after the last.
@@ -37,6 +73,10 @@ namespace Swim::Render
 		std::uint32_t KeyCount = 1;									  // 1 .. MaxParticleCurveKeys.
 		std::array<float, MaxParticleCurveKeys> Times{ 0, 1, 1, 1 };  // Strictly increasing in [0, 1].
 		std::array<float, MaxParticleCurveKeys> Values{ 1, 1, 1, 1 }; // Finite.
+
+		// Any number of keys (times increasing in [0, 1]) fitted to the four this curve holds:
+		// the ends are kept and the interior keys that matter most for the shape.
+		static ParticleCurve FromKeys(std::span<const float> times, std::span<const float> values);
 	};
 
 	// A linear RGBA color (straight alpha) over normalized age, keyed like ParticleCurve.
@@ -45,6 +85,9 @@ namespace Swim::Render
 		std::uint32_t KeyCount = 1;
 		std::array<float, MaxParticleCurveKeys> Times{ 0, 1, 1, 1 };
 		std::array<std::array<float, 4>, MaxParticleCurveKeys> Colors{ { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } } };
+
+		// Any number of keys fitted to four, as ParticleCurve::FromKeys.
+		static ParticleGradient FromKeys(std::span<const float> times, std::span<const std::array<float, 4>> colors);
 	};
 
 	struct ParticleBurst
@@ -71,6 +114,8 @@ namespace Swim::Render
 		// Spawn shape and motion, in the emitter's space.
 		ParticleShape Shape = ParticleShape::Point;
 		std::array<float, 3> ShapeExtent{ 0, 0, 0 };  // >= 0.
+		bool SurfaceOnly = false;					  // Sphere, Box and Disc: spawn on the surface / rim only.
+		ParticleDirection DirectionMode = ParticleDirection::Cone;
 		std::array<float, 3> Direction{ 0, 1, 0 };	  // Cone axis (normalized when packed).
 		float ConeAngle = 0.5f;						  // Half angle in radians, [0, pi].
 		float SpeedMin = 1.0f, SpeedMax = 2.0f;		  // >= 0.
@@ -88,11 +133,16 @@ namespace Swim::Render
 		float GroundHeight = 0.0f;
 		float Restitution = 0.5f; // [0, 1].
 		float Friction = 0.1f;	  // [0, 1].
+		bool ExpireOnContact = false; // Die on touching the ground instead of bouncing.
 
 		// Appearance over normalized age: size multiplies the spawn size; color is linear
 		// with straight alpha.
 		ParticleCurve SizeOverLife;
 		ParticleGradient ColorOverLife;
+		ParticleFacing Facing = ParticleFacing::Camera;
+		ParticleMaterial Material = ParticleMaterial::Sprite;
+		float Stretch = 0.0f;					  // Velocity facing: extra length per m/s of speed (>= 0).
+		float AspectMin = 1.0f, AspectMax = 1.0f; // Quad height / width per particle, > 0.
 		// Sprite: a BindlessResourceTable texture/sampler pair (0 = a procedural soft
 		// disc, no texture) laid out as a Columns x Rows flipbook of Frames frames,
 		// row-major from the top left. FrameRate > 0 plays at that many frames per second
@@ -106,6 +156,7 @@ namespace Swim::Render
 		std::uint32_t FlipbookFrames = 1; // 1 .. Columns * Rows.
 		float FlipbookFrameRate = 0.0f;	  // >= 0.
 		bool RandomFrame = false;
+		bool FlipbookLoop = true;				   // FrameRate > 0: wrap; false holds the last frame.
 		std::array<float, 4> UvRect{ 0, 0, 1, 1 }; // In [0, 1], u0 < u1, v0 < v1.
 
 		std::uint32_t Seed = 0;

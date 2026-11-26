@@ -53,6 +53,7 @@ namespace Swim::Render
 			record.Ambient[c] = view.Ambient[c];
 		}
 
+		record.MinimumLight = std::isfinite(view.MinimumLight) ? std::clamp(view.MinimumLight, 0.0f, 16.0f) : 0.0f;
 		record.EnvironmentIntensity = view.EnvironmentIntensity;
 		record.EnvironmentRotation = view.EnvironmentRotation;
 		record.MaterialCount = materialCount;
@@ -62,6 +63,13 @@ namespace Swim::Render
 		record.DebugMode = static_cast<std::uint32_t>(view.DebugMode);
 		record.Overlay[0] = std::isfinite(view.OverlayFovScale) && view.OverlayFovScale > 0.0f ? view.OverlayFovScale : 1.0f;
 		record.Overlay[1] = std::isfinite(view.OverlayNear) && view.OverlayNear > 0.0f ? view.OverlayNear : 0.01f;
+
+		for (std::size_t i = 0; i < view.Glint.size(); ++i)
+		{
+			record.Glint[i] = std::isfinite(view.Glint[i]) ? view.Glint[i] : 0.0f;
+		}
+
+		std::copy(view.GlintSource.begin(), view.GlintSource.end(), record.GlintSource);
 		return record;
 	}
 

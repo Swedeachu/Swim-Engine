@@ -1,6 +1,9 @@
 #include "Engine/Commands/CommandRegistry.h"
 #include "Tests/Framework/Test.h"
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 SWIM_TEST("Commands.Registry", "PlainAndWrappedCommandsPreserveQuotedArguments")
@@ -67,4 +70,34 @@ SWIM_TEST("Commands.Registry", "InvalidRegistrationAndHandlerFailuresRemainExpli
 	SWIM_CHECK_THROWS(registry.Register("run", {}), std::invalid_argument);
 	registry.Register("run", [](const auto&) { throw std::runtime_error("handler failed"); });
 	SWIM_CHECK_THROWS(registry.Dispatch("run", {}), std::runtime_error);
+}
+
+SWIM_TEST("Commands.Registry", "SessionOverridesBeatConfigLinesAndAreNotSaved")
+{
+	using Swim::Commands::VariableFlags;
+	Swim::Commands::CommandRegistry registry;
+	auto& mode = registry.AddEnum("test_mode", { "windowed", "borderless" }, 0, "Mode", "Test", VariableFlags::Saved);
+	auto& size = registry.AddInt("test_size", 1, 0, 9, "Size", "Test", VariableFlags::Saved);
+	SWIM_CHECK(registry.OverrideForSession("test_mode", "windowed"));
+	SWIM_CHECK(!registry.OverrideForSession("missing", "1"));
+
+	registry.ExecuteConfigLine("test_mode borderless");
+	registry.ExecuteConfigLine("test_size 4");
+	SWIM_CHECK(mode.GetEnum() == 0 && size.GetInt() == 4);
+	SWIM_CHECK(registry.IsSessionOverride("test_mode"));
+
+	// The config keeps its own value for the overridden variable.
+	const auto path = std::filesystem::temp_directory_path() / "swim-session-override-test.cfg";
+	SWIM_REQUIRE(registry.SaveConfig(path));
+	std::ifstream file(path);
+	const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+	file.close();
+	std::filesystem::remove(path);
+	SWIM_CHECK(text.find("test_mode borderless") != std::string::npos && text.find("test_size 4") != std::string::npos);
+
+	// A deliberate change ends the override, and that value is what gets saved.
+	mode.SetEnum(1u);
+	SWIM_CHECK(!registry.IsSessionOverride("test_mode"));
+	registry.ExecuteConfigLine("test_mode windowed");
+	SWIM_CHECK(mode.GetEnum() == 0);
 }

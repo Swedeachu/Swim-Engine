@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <charconv>
 #include <functional>
 #include <stdexcept>
@@ -133,6 +134,13 @@ namespace Swim::Commands
 
 		void RemoveConfigWriter(std::string_view key);
 
+		// Sets a variable for this run only (a command-line flag): config lines for it are
+		// remembered instead of applied, and SaveConfig keeps writing the remembered value.
+		// A later change to another value (console, settings, code) ends the override.
+		bool OverrideForSession(std::string_view name, std::string_view text);
+
+		bool IsSessionOverride(std::string_view name) const;
+
 		// True after a saved variable changed or MarkConfigDirty, until MarkConfigSaved.
 		bool IsConfigDirty() const { return configDirty; }
 
@@ -215,6 +223,14 @@ namespace Swim::Commands
 		std::unordered_map<std::string, CommandDesc> descriptions;
 		std::unordered_map<std::string, std::unique_ptr<ConsoleVariable>> variables;
 		std::unordered_map<std::string, std::string> pendingValues;
+
+		struct SessionOverride
+		{
+			std::string Value;				  // Normalized override text.
+			std::optional<std::string> Saved; // The config's value, written back by SaveConfig.
+		};
+
+		std::unordered_map<std::string, SessionOverride> sessionOverrides;
 		std::vector<std::pair<std::string, ConfigWriter>> configWriters;
 		std::vector<std::pair<ConsoleVariable::SubscriptionId, ChangeListener>> changeListeners;
 		ConsoleVariable::SubscriptionId nextListener = 1;

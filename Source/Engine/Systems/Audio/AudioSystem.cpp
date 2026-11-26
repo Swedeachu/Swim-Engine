@@ -180,6 +180,7 @@ namespace Engine
 		{
 			std::filesystem::path Path;
 			SoundLoad Load = SoundLoad::Auto;
+			std::string Key; // As given to LoadSound.
 		};
 
 		struct Group
@@ -215,6 +216,7 @@ namespace Engine
 		std::array<Voice, MaxSlots> voices{};
 		std::uint64_t order = 0;
 		std::uint64_t played = 0;
+		std::function<void(const AudioPlayRecord&)> playObserver;
 		std::uint64_t stolen = 0;
 		std::uint64_t refused = 0;
 		double time = 0.0;
@@ -1124,7 +1126,7 @@ namespace Engine
 		}
 
 		const auto id = static_cast<std::uint32_t>(I.sounds.size());
-		I.sounds.push_back({ std::move(resolved), load });
+		I.sounds.push_back({ std::move(resolved), load, key });
 		I.soundIds.emplace(key, id);
 		return { id };
 	}
@@ -1225,9 +1227,19 @@ namespace Engine
 			command.Params.Load = I.sounds[sound.Id].Load;
 		}
 
+		if (I.playObserver)
+		{
+			I.playObserver({ I.sounds[sound.Id].Key, params.Position, params.Volume, params.Pitch, params.Loop });
+		}
+
 		I.Send(std::move(command));
 		++I.played;
 		return { index, voice.Generation };
+	}
+
+	void AudioSystem::SetPlayObserver(std::function<void(const AudioPlayRecord&)> observer)
+	{
+		impl->playObserver = std::move(observer);
 	}
 
 	VoiceHandle AudioSystem::Play(std::string_view path, const PlayParams& params)

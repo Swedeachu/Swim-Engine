@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <iostream>
 #include <stdexcept>
 
 namespace Swim::UI
@@ -70,7 +71,124 @@ namespace Swim::UI
 				static_cast<std::uint8_t>(s.TextWrap) <= static_cast<std::uint8_t>(Text::TextWrap::Word);
 		}
 
+		// Fix(value, low, high, fallback): clamp, or the fallback when not finite.
+		bool Fix(float& value, float low, float high, float fallback)
+		{
+			const float fixed = std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+			const bool changed = !(fixed == value);
+			value = fixed;
+			return changed;
+		}
+
+		bool FixPoint(UiPoint& point, float low, float high, UiPoint fallback)
+		{
+			const bool x = Fix(point.X, low, high, fallback.X);
+			const bool y = Fix(point.Y, low, high, fallback.Y);
+			return x || y;
+		}
+
+		bool FixEdges(UiEdges& edges, float high = Internal::MaxLogical)
+		{
+			bool changed = false;
+
+			for (float* e : { &edges.Left, &edges.Top, &edges.Right, &edges.Bottom })
+			{
+				changed |= Fix(*e, 0.0f, high, 0.0f);
+			}
+
+			return changed;
+		}
+
+		bool FixColor(UiColor& color, const UiColor& fallback)
+		{
+			bool changed = Fix(color.R, 0.0f, Internal::MaxLogical, fallback.R);
+			changed |= Fix(color.G, 0.0f, Internal::MaxLogical, fallback.G);
+			changed |= Fix(color.B, 0.0f, Internal::MaxLogical, fallback.B);
+			changed |= Fix(color.A, 0.0f, 1.0f, fallback.A);
+			return changed;
+		}
+
+		bool FixLength(UiLength& length)
+		{
+			if (static_cast<std::uint8_t>(length.Unit) > static_cast<std::uint8_t>(UiUnit::Percent))
+			{
+				length = {};
+				return true;
+			}
+
+			return Fix(length.Value, 0.0f, length.Unit == UiUnit::Percent ? 1.0f : Internal::MaxLogical, 0.0f);
+		}
+
+		template <typename E> bool FixEnum(E& value, E last, E fallback)
+		{
+			if (static_cast<std::uint8_t>(value) > static_cast<std::uint8_t>(last))
+			{
+				value = fallback;
+				return true;
+			}
+
+			return false;
+		}
+
 	} // namespace
+
+	bool SanitizeUiStyle(UiStyle& s)
+	{
+		static const UiStyle d;
+		const float max = Internal::MaxLogical;
+		bool c = FixLength(s.Width);
+		c |= FixLength(s.Height);
+		c |= FixPoint(s.MinSize, 0.0f, max, d.MinSize);
+		c |= Fix(s.MaxSize.X, s.MinSize.X, max, d.MaxSize.X);
+		c |= Fix(s.MaxSize.Y, s.MinSize.Y, max, d.MaxSize.Y);
+		c |= FixEdges(s.Margin);
+		c |= FixEdges(s.Padding);
+		c |= FixEnum(s.Flow, UiFlow::Column, d.Flow);
+		c |= Fix(s.Gap, 0.0f, max, d.Gap);
+		c |= Fix(s.Grow, 0.0f, max, d.Grow);
+		c |= Fix(s.Shrink, 0.0f, max, d.Shrink);
+		c |= FixEnum(s.Justify, UiJustify::SpaceEvenly, d.Justify);
+		c |= FixEnum(s.AlignItems, UiAlign::Stretch, d.AlignItems);
+		c |= FixEnum(s.AlignSelf, UiAlign::Stretch, d.AlignSelf);
+		c |= Fix(s.AspectRatio, 0.0f, max, d.AspectRatio);
+		c |= FixPoint(s.Offset, -max, max, d.Offset);
+		c |= FixPoint(s.AnchorMin, 0.0f, 1.0f, d.AnchorMin);
+		c |= FixPoint(s.AnchorMax, 0.0f, 1.0f, d.AnchorMax);
+		c |= FixPoint(s.Pivot, 0.0f, 1.0f, d.Pivot);
+		c |= FixColor(s.Background, d.Background);
+		c |= FixEnum(s.Gradient, UiGradient::Vertical, d.Gradient);
+		c |= FixColor(s.BackgroundEnd, d.BackgroundEnd);
+		c |= Fix(s.CornerRadius, 0.0f, max, d.CornerRadius);
+		c |= Fix(s.BorderWidth, 0.0f, max, d.BorderWidth);
+		c |= FixColor(s.BorderColor, d.BorderColor);
+		c |= FixColor(s.TextColor, d.TextColor);
+		c |= FixEnum(s.TextAlign, Text::TextAlign::Center, d.TextAlign);
+		c |= FixEnum(s.TextWrap, Text::TextWrap::Word, d.TextWrap);
+		c |= Fix(s.LineSpacing, 0.25f, 8.0f, d.LineSpacing);
+		c |= FixColor(s.SelectionColor, d.SelectionColor);
+		c |= FixColor(s.CaretColor, d.CaretColor);
+		c |= Fix(s.Opacity, 0.0f, 1.0f, d.Opacity);
+		c |= Fix(s.TransitionSeconds, 0.0f, 60.0f, d.TransitionSeconds);
+		return c;
+	}
+
+	bool SanitizeUiImage(UiImage& image)
+	{
+		static const UiImage d;
+		const float max = Internal::MaxLogical;
+		bool c = FixPoint(image.Size, 0.0f, max, d.Size);
+		c |= Fix(image.Uv.X, -max, max, d.Uv.X);
+		c |= Fix(image.Uv.Y, -max, max, d.Uv.Y);
+		c |= Fix(image.Uv.Width, -max, max, d.Uv.Width);
+		c |= Fix(image.Uv.Height, -max, max, d.Uv.Height);
+		c |= FixEdges(image.Slice);
+		c |= FixEdges(image.SliceUv, 1.0f);
+		c |= FixColor(image.Tint, d.Tint);
+		c |= FixEnum(image.Fit, UiImageFit::Contain, d.Fit);
+		c |= FixEnum(image.Blend, UiBlend::Invert, d.Blend);
+		c |= Fix(image.Glint, 0.0f, 4.0f, d.Glint);
+		return c;
+	}
 
 	namespace Internal
 	{
@@ -421,10 +539,17 @@ namespace Swim::UI
 		impl->ClearUnavailable();
 	}
 
-	void UiDocument::SetStyle(UiNodeId id, const UiStyle& style)
+	void UiDocument::SetStyle(UiNodeId id, const UiStyle& requested)
 	{
-		Internal::ValidateStyle(style);
 		auto& node = impl->Get(id);
+		UiStyle style = requested;
+
+		if (SanitizeUiStyle(style) && !node.SanitizeWarned)
+		{
+			node.SanitizeWarned = true;
+			std::cerr << "[UI] Out-of-range style values clamped on node " << id.Value << '\n';
+		}
+
 		const bool paintOnly = Internal::OnlyPaintChanged(node.Style, style);
 		node.Style = style;
 
@@ -537,10 +662,17 @@ namespace Swim::UI
 		return impl->Get(id).TextLayout.get();
 	}
 
-	void UiDocument::SetImage(UiNodeId id, const UiImage& image)
+	void UiDocument::SetImage(UiNodeId id, const UiImage& requested)
 	{
-		Internal::ValidateImage(image);
 		auto& node = impl->Get(id);
+		UiImage image = requested;
+
+		if (SanitizeUiImage(image) && !node.SanitizeWarned)
+		{
+			node.SanitizeWarned = true;
+			std::cerr << "[UI] Out-of-range image values clamped on node " << id.Value << '\n';
+		}
+
 		node.HasImage = true;
 		node.Image = image;
 		impl->MarkLayoutDirty(id);

@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -63,7 +64,9 @@ namespace Engine
 
 		MeshHandle Get(BuiltinMesh mesh) const { return builtins[static_cast<std::size_t>(mesh)]; }
 
-		// Publishes (or replaces) "Procedural/<name>" and requests residency.
+		// Publishes (or replaces) "Procedural/<name>" and requests residency. A replacement is
+		// a new asset; handles to the old one keep working through Resolve (materials, scene
+		// meshes, viewports and GetBindlessIndex resolve automatically).
 		MeshHandle Register(std::string_view name, const ProceduralMeshes::MeshData& mesh);
 
 		MeshHandle Find(std::string_view name) const;
@@ -85,6 +88,37 @@ namespace Engine
 			bool srgb = true, bool mips = true);
 
 		TextureHandle FindTexture(std::string_view name) const;
+
+		// Drops a registered procedural texture (its bindless element is freed after the GPU
+		// is done with it). Materials still pointing at it sample the fallback.
+		void UnregisterTexture(std::string_view name);
+
+		// The current asset for a handle whose name was registered again since (the handle
+		// itself otherwise).
+		MeshHandle Resolve(MeshHandle mesh) const;
+
+		// Moves the asset ahead of the residency queue (AssetResidencyService::MakeUrgent):
+		// for a few small meshes and textures something is waiting on, such as UI previews.
+		void MakeUrgent(MeshHandle mesh);
+
+		void MakeUrgent(TextureHandle texture);
+
+		TextureHandle Resolve(TextureHandle texture) const;
+
+		// Bumped whenever a mesh is replaced, so cached resolutions can be refreshed.
+		std::uint64_t GetMeshReplacements() const { return meshReplacements; }
+
+		struct Stats
+		{
+			std::uint32_t Meshes = 0; // Registered and loaded names.
+			std::uint32_t Textures = 0;
+			std::uint32_t ResidentMeshes = 0;
+			std::uint32_t ResidentTextures = 0;
+			std::uint32_t PendingReleases = 0; // Retired assets waiting for FlushReleases.
+			std::uint64_t Replacements = 0;	   // Names registered again (meshes and textures).
+		};
+
+		Stats GetStats() const;
 
 		// A two-colour checkerboard (cells x cells squares).
 		TextureHandle RegisterChecker(
@@ -113,6 +147,24 @@ namespace Engine
 
 		void UntrackGpuMesh(Swim::Render::GpuMeshHandle mesh);
 
+		// The library path a handle was registered or loaded under ("Procedural/<name>" or the
+		// cooked logical path); empty when unknown. Recorders use it as the asset key.
+		std::string_view FindName(MeshHandle mesh) const;
+
+		std::string_view FindTextureName(TextureHandle texture) const;
+
+		// Sees every procedural mesh and texture registration with its source data, so a
+		// scene recorder can store runtime content it cannot find again by name.
+		struct SourceObserver
+		{
+			std::function<void(MeshHandle, std::string_view path, const ProceduralMeshes::MeshData&)> Mesh;
+			std::function<void(TextureHandle, std::string_view path, std::uint32_t width, std::uint32_t height,
+				std::span<const std::uint8_t> rgba8, bool srgb, bool mips)>
+				Texture;
+		};
+
+		void SetSourceObserver(SourceObserver observer) { sourceObserver = std::move(observer); }
+
 		std::uint32_t GetRequestedMeshCount() const { return static_cast<std::uint32_t>(meshes.size()); }
 
 		std::uint32_t GetResidentMeshCount() const;
@@ -130,10 +182,14 @@ namespace Engine
 		std::unordered_map<std::string, MeshHandle> meshes;		 // By logical path.
 		std::unordered_map<std::string, TextureHandle> textures; // By logical path.
 		std::vector<Swim::Render::GpuMeshHandle> extraMeshes;
+		std::unordered_map<std::uint64_t, std::string> names; // Asset id -> library path (meshes and textures).
+		SourceObserver sourceObserver;
 		std::vector<MeshHandle> released;
 		std::vector<TextureHandle> releasedTextures;
+		std::unordered_map<std::uint64_t, std::string> replaced; // Replaced asset id -> its library path.
 		std::uint64_t revision = 0;
-
+		std::uint64_t meshReplacements = 0;
+		std::uint64_t replacements = 0;
 	};
 
 	// A full RGBA8 mip chain (box filtered; sRGB images are filtered in linear space).

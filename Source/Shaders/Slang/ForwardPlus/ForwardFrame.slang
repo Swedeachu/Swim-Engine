@@ -117,7 +117,7 @@ float3 ForwardDirect(ForwardView view, ClusterGrid grid, StandardPbrSurface surf
 			continue;
 		}
 		const float3 brdf = StandardPbrEvaluateBrdf(surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal,
-			toCamera, sample.Direction);
+			toCamera, sample.Direction, surface.Thin ? 0.0 : 1.0);
 		// Facing away (zero BRDF): no shadow lookup (its PCF taps are the costliest part).
 		if (all(brdf <= float3(0.0, 0.0, 0.0)))
 		{
@@ -137,12 +137,36 @@ struct ForwardLighting
 	float3 Specular;	// Specular IBL (ForwardPlus::SpecularRadiance), part of Indirect.
 };
 
+// Full bright (ForwardView::MinimumLight): the light to add so a surface never falls below
+// a floor of diffuse light, shaded softly by its normal (sky above brighter than below) so
+// form stays readable; surfaces already lit above it (sunlit sides) keep their light, so
+// shadows still read against them. `lit` is the diffuse + indirect light it has.
+float3 ForwardMinimumLight(ForwardView view, StandardPbrSurface surface, float3 lit)
+{
+	if (view.MinimumLight <= 0.0)
+	{
+		return float3(0.0, 0.0, 0.0);
+	}
+	const float hemisphere = 0.7 + 0.3 * saturate(surface.Normal.y * 0.5 + 0.5);
+	const float3 floorLight = view.MinimumLight * hemisphere * surface.BaseColor * lerp(0.6, 1.0, surface.Occlusion);
+	// A soft maximum: the lift fades as the surface's own light approaches the floor.
+	const float3 deficit = max(floorLight - lit * 0.85, 0.0);
+	return deficit;
+}
+
 // pixel: SV_Position.xy of the fragment (its cluster). view and grid: Views[0], Grid[0]
 // (a caller that reads them already passes its copies: fewer buffer loads).
 ForwardLighting ForwardLightSurface(ForwardView view, ClusterGrid grid, StandardPbrSurface surface, float3 worldPosition, float2 pixel)
 {
 	const float3 toCamera = normalize(view.CameraPosition - worldPosition);
 	StandardPbrStabilizeThin(surface, toCamera);
+	// Specular anti-aliasing for every surface lit here, however the caller built it.
+	const float3 normalDdx = ddx(surface.Normal);
+	const float3 normalDdy = ddy(surface.Normal);
+	if (all(isfinite(normalDdx)) && all(isfinite(normalDdy)))
+	{
+		surface.PerceptualRoughness = StandardPbrSpecularAntiAlias(surface.PerceptualRoughness, normalDdx, normalDdy);
+	}
 	const float viewDepth = -dot(grid.ViewRow2, float4(worldPosition, 1.0));
 	const float3 direct = ForwardDirect(view, grid, surface, toCamera, worldPosition, pixel.x, pixel.y, viewDepth);
 	float3 ibl = float3(0.0, 0.0, 0.0);
@@ -169,6 +193,7 @@ ForwardLighting ForwardLightSurface(ForwardView view, ClusterGrid grid, Standard
 		lit.Reflectance = float3(0.0, 0.0, 0.0);
 	}
 	lit.Indirect = view.Ambient * surface.BaseColor * surface.Occlusion + ibl;
+	lit.Indirect += ForwardMinimumLight(view, surface, direct + lit.Indirect);
 	lit.Radiance = direct + lit.Indirect + surface.Emissive;
 	return lit;
 }

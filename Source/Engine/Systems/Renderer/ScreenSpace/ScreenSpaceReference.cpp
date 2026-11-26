@@ -1,4 +1,5 @@
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceReference.h"
+#include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceSettings.h"
 
 #include <algorithm>
 #include <cmath>
@@ -199,6 +200,10 @@ namespace Swim::Render
 		params.FogAnisotropy = fog.Anisotropy;
 		params.FogStartDistance = fog.StartDistance;
 		params.FogMaxDistance = fog.MaxDistance;
+		params.FogCurve[0] = float(std::min(static_cast<std::uint32_t>(fog.Curve), 3u));
+		params.FogCurve[1] = std::max(fog.EndDistance, fog.StartDistance);
+		params.FogCurve[2] = fog.Exponent;
+		params.FogCurve[3] = std::clamp(fog.MaxOpacity, 0.0f, 1.0f);
 		const auto& ssr = settings.Reflections;
 		std::copy(view.Projection.begin(), view.Projection.end(), params.Projection);
 		params.SsrEnabled = ssr.Enabled ? 1u : 0u;
@@ -639,7 +644,11 @@ namespace Swim::Render::ScreenSpace
 	FogSample EvaluateFog(const GpuScreenSpaceParams& params, const Float3& camera, const Float3& direction, float distance)
 	{
 		FogSample sample;
-		sample.Transmittance = std::exp(-FogOpticalDepth(params, camera, direction, distance));
+		const auto curve = static_cast<FogCurve>(static_cast<std::uint32_t>(params.FogCurve[0]));
+		const float amount = curve == FogCurve::Exponential
+			? 1.0f - std::exp(-FogOpticalDepth(params, camera, direction, distance))
+			: DistanceFogShape(curve, params.FogStartDistance, params.FogCurve[1], 0.0f, params.FogCurve[2], distance);
+		sample.Transmittance = 1.0f - params.FogCurve[3] * amount;
 		const Float3 sun{ params.FogSunDirection[0], params.FogSunDirection[1], params.FogSunDirection[2] };
 		const float phase = HenyeyGreenstein(params.FogAnisotropy, -Dot(sun, direction));
 

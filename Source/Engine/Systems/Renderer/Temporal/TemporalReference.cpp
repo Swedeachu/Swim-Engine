@@ -1,6 +1,7 @@
 #include "Engine/Systems/Renderer/Temporal/TemporalReference.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -131,6 +132,42 @@ namespace Swim::Render::Temporal
 		return { center[0] + offset[0] / scale, center[1] + offset[1] / scale, center[2] + offset[2] / scale };
 	}
 
+	Float4 SampleCatmullRom(const ColorImage& image, const Float2& uv)
+	{
+		const float px = uv[0] * float(image.Width) - 0.5f;
+		const float py = uv[1] * float(image.Height) - 0.5f;
+		const float fx0 = std::floor(px);
+		const float fy0 = std::floor(py);
+		const auto weights = [](float t)
+		{
+			const float t2 = t * t;
+			const float t3 = t2 * t;
+			return std::array<float, 4>{ 0.5f * (-t3 + 2.0f * t2 - t), 0.5f * (3.0f * t3 - 5.0f * t2 + 2.0f),
+				0.5f * (-3.0f * t3 + 4.0f * t2 + t), 0.5f * (t3 - t2) };
+		};
+		const auto wx = weights(px - fx0);
+		const auto wy = weights(py - fy0);
+		Float4 result{};
+
+		for (int j = 0; j < 4; ++j)
+		{
+			const auto y = static_cast<std::uint32_t>(std::clamp(fy0 - 1.0f + float(j), 0.0f, float(image.Height - 1)));
+
+			for (int i = 0; i < 4; ++i)
+			{
+				const auto x = static_cast<std::uint32_t>(std::clamp(fx0 - 1.0f + float(i), 0.0f, float(image.Width - 1)));
+				const float w = wx[i] * wy[j];
+
+				for (int c = 0; c < 4; ++c)
+				{
+					result[c] += image.At(x, y)[c] * w;
+				}
+			}
+		}
+
+		return result;
+	}
+
 	Float4 SampleBilinear(const ColorImage& image, const Float2& uv)
 	{
 		const float px = uv[0] * float(image.Width) - 0.5f;
@@ -229,7 +266,7 @@ namespace Swim::Render::Temporal
 			return { n.Center[0], n.Center[1], n.Center[2], 1.0f };
 		}
 
-		const auto clipped = YCoCgToRgb(ClipToBox(RgbToYCoCg(Sanitize(SampleBilinear(*history, previous))), n.Minimum, n.Maximum));
+		const auto clipped = YCoCgToRgb(ClipToBox(RgbToYCoCg(Sanitize(SampleCatmullRom(*history, previous))), n.Minimum, n.Maximum));
 		const Float3 past{ std::max(clipped[0], 0.0f), std::max(clipped[1], 0.0f), std::max(clipped[2], 0.0f) };
 		const float currentWeight = feedback / (1.0f + Luminance(n.Center));
 		const float pastWeight = (1.0f - feedback) / (1.0f + Luminance(past));

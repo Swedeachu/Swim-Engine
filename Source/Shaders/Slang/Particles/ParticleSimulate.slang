@@ -42,9 +42,18 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	p.Position = p.Position + p.Velocity * dt;
 	p.Rotation = p.Rotation + p.AngularVelocity * dt;
 	p.Age = age;
-	if ((Emitters[emitterIndex].Flags & ParticleFlagCollision) != 0u)
+	const uint flags = Emitters[emitterIndex].Flags;
+	if ((flags & ParticleFlagCollision) != 0u)
 	{
 		const float ground = Emitters[emitterIndex].GroundHeight;
+		if (p.Position.y < ground && (flags & ParticleFlagExpireOnContact) != 0u)
+		{
+			Particles[slot].Lifetime = 0.0;
+			uint previous;
+			InterlockedAdd(Counters[Emitters[emitterIndex].Row].Free, 1u, previous);
+			FreeList[firstSlot + previous] = slot;
+			return;
+		}
 		if (p.Position.y < ground)
 		{
 			p.Position.y = ground;

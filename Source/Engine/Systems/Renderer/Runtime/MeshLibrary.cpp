@@ -6,7 +6,9 @@
 #include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 namespace Engine
@@ -70,75 +72,136 @@ namespace Engine
 		payload.Container = TextureContainerFormat::NativeMipData;
 		payload.Format = srgb ? TexturePayloadFormat::RGBA8SRgb : TexturePayloadFormat::RGBA8UNorm;
 
-		std::vector<float> level(rgba8.size());
+		// The whole chain is sized up front; mip 0 is the input bytes as they are.
+		std::uint64_t total = 0;
 
-		for (std::size_t i = 0; i < rgba8.size(); ++i)
-		{
-			const float value = float(rgba8[i]) / 255.0f;
-			level[i] = srgb && i % 4 != 3 ? SrgbToLinear(value) : value;
-		}
-
-		std::uint32_t w = width;
-		std::uint32_t h = height;
-
-		while (true)
+		for (std::uint32_t w = width, h = height;; w = std::max(w / 2, 1u), h = std::max(h / 2, 1u))
 		{
 			TextureMipDesc mip;
 			mip.Width = w;
 			mip.Height = h;
-			mip.OffsetBytes = payload.Bytes.size();
+			mip.OffsetBytes = total;
 			mip.SizeBytes = std::uint64_t(w) * h * 4;
 			mip.UncompressedSizeBytes = mip.SizeBytes;
-
-			for (std::size_t i = 0; i < level.size(); ++i)
-			{
-				const float value = srgb && i % 4 != 3 ? LinearToSrgb(level[i]) : level[i];
-				payload.Bytes.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f)));
-			}
-
 			payload.Mips.push_back(mip);
+			total += mip.SizeBytes;
 
 			if (!mips || (w == 1 && h == 1))
 			{
 				break;
 			}
+		}
 
-			const std::uint32_t nw = std::max(w / 2, 1u);
-			const std::uint32_t nh = std::max(h / 2, 1u);
-			std::vector<float> next(std::size_t(nw) * nh * 4, 0.0f);
+		payload.Bytes.resize(total);
+		std::memcpy(payload.Bytes.data(), rgba8.data(), rgba8.size());
+
+		if (payload.Mips.size() == 1)
+		{
+			texture.Payloads.push_back(std::move(payload));
+			return texture;
+		}
+
+		// Levels are filtered in linear float (colour premultiplied by alpha for sRGB) and
+		// encoded through tables; no pow per texel.
+		const auto& decode = Srgb8ToLinearTable();
+		const auto encodePlain = [](float value)
+		{
+			return static_cast<std::uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+		};
+
+		// Mip 1 reads the input bytes through the decode table; later levels read floats.
+		std::vector<float> level;
+		std::vector<float> next;
+		const auto fetch = [&](std::size_t texel, float out[4])
+		{
+			if (level.empty())
+			{
+				const std::uint8_t* p = &rgba8[texel * 4];
+
+				for (int c = 0; c < 3; ++c)
+				{
+					out[c] = srgb ? decode[p[c]] : float(p[c]) * (1.0f / 255.0f);
+				}
+
+				out[3] = float(p[3]) * (1.0f / 255.0f);
+			}
+			else
+			{
+				std::memcpy(out, &level[texel * 4], sizeof(float) * 4);
+			}
+		};
+		std::uint32_t w = width;
+		std::uint32_t h = height;
+
+		for (std::size_t m = 1; m < payload.Mips.size(); ++m)
+		{
+			const std::uint32_t nw = payload.Mips[m].Width;
+			const std::uint32_t nh = payload.Mips[m].Height;
+			next.assign(std::size_t(nw) * nh * 4, 0.0f);
+			auto* bytes = reinterpret_cast<std::uint8_t*>(payload.Bytes.data() + payload.Mips[m].OffsetBytes);
 
 			for (std::uint32_t y = 0; y < nh; ++y)
 			{
+				const std::uint32_t y0 = std::min(y * 2, h - 1);
+				const std::uint32_t y1 = std::min(y * 2 + 1, h - 1);
+
 				for (std::uint32_t x = 0; x < nw; ++x)
 				{
-					for (std::uint32_t c = 0; c < 4; ++c)
-					{
-						float sum = 0.0f;
-						int count = 0;
+					const std::uint32_t x0 = std::min(x * 2, w - 1);
+					const std::uint32_t x1 = std::min(x * 2 + 1, w - 1);
+					float texels[4][4];
+					fetch(std::size_t(y0) * w + x0, texels[0]);
+					fetch(std::size_t(y0) * w + x1, texels[1]);
+					fetch(std::size_t(y1) * w + x0, texels[2]);
+					fetch(std::size_t(y1) * w + x1, texels[3]);
+					// sRGB colour is averaged by alpha, so clear texels (often white or black) never
+					// bleed into cut-out edges at a distance; data and alpha take the plain average.
+					float colour[3] = {};
+					float plain[3] = {};
+					float alpha = 0.0f;
 
-						for (std::uint32_t dy = 0; dy < 2; ++dy)
+					for (const auto& texel : texels)
+					{
+						for (int c = 0; c < 3; ++c)
 						{
-							for (std::uint32_t dx = 0; dx < 2; ++dx)
-							{
-								const std::uint32_t sx = std::min(x * 2 + dx, w - 1);
-								const std::uint32_t sy = std::min(y * 2 + dy, h - 1);
-								sum += level[(std::size_t(sy) * w + sx) * 4 + c];
-								++count;
-							}
+							colour[c] += texel[c] * texel[3];
+							plain[c] += texel[c];
 						}
 
-						next[(std::size_t(y) * nw + x) * 4 + c] = sum / float(count);
+						alpha += texel[3];
 					}
+
+					const std::size_t at = (std::size_t(y) * nw + x) * 4;
+					float* out = &next[at];
+
+					for (int c = 0; c < 3; ++c)
+					{
+						out[c] = srgb && alpha > 0.0f ? colour[c] / alpha : plain[c] * 0.25f;
+						bytes[at + c] = srgb ? LinearToSrgb8(out[c]) : encodePlain(out[c]);
+					}
+
+					out[3] = alpha * 0.25f;
+					bytes[at + 3] = encodePlain(out[3]);
 				}
 			}
 
-			level = std::move(next);
+			std::swap(level, next);
 			w = nw;
 			h = nh;
 		}
 
 		texture.Payloads.push_back(std::move(payload));
 		return texture;
+	}
+
+	void MeshLibrary::MakeUrgent(MeshHandle mesh)
+	{
+		residency.MakeUrgent(Resolve(mesh));
+	}
+
+	void MeshLibrary::MakeUrgent(TextureHandle texture)
+	{
+		residency.MakeUrgent(Resolve(texture));
 	}
 
 	MeshLibrary::MeshLibrary(Swim::Assets::AssetSystem& assetSystem, Swim::Render::AssetResidencyService& residencyService,
@@ -161,6 +224,9 @@ namespace Engine
 		if (slot.IsValid())
 		{
 			released.push_back(slot);
+			replaced[slot.GetId().Value] = path;
+			++meshReplacements;
+			++replacements;
 		}
 
 		const std::string assetPath = path + "#" + std::to_string(revision++);
@@ -173,6 +239,13 @@ namespace Engine
 
 		residency.RequestMesh(handle);
 		slot = handle;
+		names[handle.GetId().Value] = path;
+
+		if (sourceObserver.Mesh)
+		{
+			sourceObserver.Mesh(handle, path, mesh);
+		}
+
 		return handle;
 	}
 
@@ -191,6 +264,7 @@ namespace Engine
 	{
 		for (const auto& handle : released)
 		{
+			names.erase(handle.GetId().Value);
 			residency.ReleaseMesh(handle, lastUse);
 			assets.Forget(handle);
 		}
@@ -199,6 +273,7 @@ namespace Engine
 
 		for (const auto& handle : releasedTextures)
 		{
+			names.erase(handle.GetId().Value);
 			residency.ReleaseTexture(handle, lastUse);
 			assets.Forget(handle);
 		}
@@ -230,6 +305,7 @@ namespace Engine
 
 		residency.RequestMesh(handle);
 		meshes[std::string(logicalPath)] = handle;
+		names[handle.GetId().Value] = std::string(logicalPath);
 		return handle;
 	}
 
@@ -244,6 +320,8 @@ namespace Engine
 		if (slot.IsValid())
 		{
 			releasedTextures.push_back(slot);
+			replaced[slot.GetId().Value] = path;
+			++replacements;
 		}
 
 		const std::string assetPath = path + "#" + std::to_string(revision++);
@@ -256,7 +334,26 @@ namespace Engine
 
 		residency.RequestTexture(handle);
 		slot = handle;
+		names[handle.GetId().Value] = path;
+
+		if (sourceObserver.Texture)
+		{
+			sourceObserver.Texture(handle, path, width, height, rgba8, srgb, mips);
+		}
+
 		return handle;
+	}
+
+	std::string_view MeshLibrary::FindName(MeshHandle mesh) const
+	{
+		const auto found = names.find(mesh.GetId().Value);
+		return found == names.end() ? std::string_view{} : std::string_view(found->second);
+	}
+
+	std::string_view MeshLibrary::FindTextureName(TextureHandle texture) const
+	{
+		const auto found = names.find(texture.GetId().Value);
+		return found == names.end() ? std::string_view{} : std::string_view(found->second);
 	}
 
 	MeshLibrary::TextureHandle MeshLibrary::FindTexture(std::string_view name) const
@@ -287,17 +384,76 @@ namespace Engine
 
 	bool MeshLibrary::IsResident(MeshHandle mesh) const
 	{
-		return residency.GetState(mesh) == Swim::Render::AssetResidencyState::Resident;
+		return residency.GetState(Resolve(mesh)) == Swim::Render::AssetResidencyState::Resident;
 	}
 
 	bool MeshLibrary::IsResident(TextureHandle texture) const
 	{
-		return residency.GetState(texture) == Swim::Render::AssetResidencyState::Resident;
+		return residency.GetState(Resolve(texture)) == Swim::Render::AssetResidencyState::Resident;
 	}
 
 	std::uint32_t MeshLibrary::GetBindlessIndex(TextureHandle texture) const
 	{
-		return residency.GetBindlessIndex(texture);
+		return residency.GetBindlessIndex(Resolve(texture));
+	}
+
+	void MeshLibrary::UnregisterTexture(std::string_view name)
+	{
+		const auto found = textures.find(ProceduralPath(name));
+
+		if (found != textures.end())
+		{
+			releasedTextures.push_back(found->second);
+			textures.erase(found);
+		}
+	}
+
+	MeshLibrary::MeshHandle MeshLibrary::Resolve(MeshHandle mesh) const
+	{
+		if (replaced.empty() || !mesh.IsValid())
+		{
+			return mesh;
+		}
+
+		const auto path = replaced.find(mesh.GetId().Value);
+
+		if (path == replaced.end())
+		{
+			return mesh;
+		}
+
+		const auto current = meshes.find(path->second);
+		return current == meshes.end() ? mesh : current->second;
+	}
+
+	MeshLibrary::TextureHandle MeshLibrary::Resolve(TextureHandle texture) const
+	{
+		if (replaced.empty() || !texture.IsValid())
+		{
+			return texture;
+		}
+
+		const auto path = replaced.find(texture.GetId().Value);
+
+		if (path == replaced.end())
+		{
+			return texture;
+		}
+
+		const auto current = textures.find(path->second);
+		return current == textures.end() ? texture : current->second;
+	}
+
+	MeshLibrary::Stats MeshLibrary::GetStats() const
+	{
+		Stats stats;
+		stats.Meshes = static_cast<std::uint32_t>(meshes.size());
+		stats.Textures = static_cast<std::uint32_t>(textures.size());
+		stats.ResidentMeshes = GetResidentMeshCount();
+		stats.ResidentTextures = GetResidentTextureCount();
+		stats.PendingReleases = static_cast<std::uint32_t>(released.size() + releasedTextures.size());
+		stats.Replacements = replacements;
+		return stats;
 	}
 
 	std::uint32_t MeshLibrary::GetResidentMeshCount() const

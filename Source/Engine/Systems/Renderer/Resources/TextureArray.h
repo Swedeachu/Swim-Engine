@@ -41,6 +41,10 @@ namespace Swim::Render
 		// cooked on load) scale their alpha to keep mip 0's coverage at it, so cutouts stay
 		// filled in with distance instead of thinning away.
 		float AlphaCoverageCutoff = 0.0f;
+		// SetLayer RGBA8 data that needs work (missing mips or a different size) is checked at
+		// once but resized and given its mips on the loader thread: the layer is Loading until
+		// then, and the previous image or the placeholder stays.
+		bool GenerateMipsInBackground = false;
 		std::string DebugName = "Texture array";
 	};
 
@@ -99,8 +103,17 @@ namespace Swim::Render
 
 		std::uint32_t GetMipLevels() const { return mipLevels; }
 
-		// Replaces a layer from memory (validated now; throws std::invalid_argument).
+		// Replaces a layer from memory (validated now; throws std::invalid_argument). See
+		// TextureArrayDesc::GenerateMipsInBackground.
 		void SetLayer(std::uint32_t layer, TextureLayerData data);
+
+		// Validates and finishes data once (resample, mips) for SetLayer(layer, prepared).
+		// Throws std::invalid_argument.
+		std::shared_ptr<const TextureLayerData> PrepareLayer(TextureLayerData data) const;
+
+		// Replaces a layer with data from PrepareLayer: no copy, allocation or mip work, so
+		// frames prepared once can be swapped in every frame (flipbooks).
+		void SetLayer(std::uint32_t layer, std::shared_ptr<const TextureLayerData> prepared);
 
 		// Loads a layer from a file in the background; a newer request for the same layer
 		// replaces an older one. Higher priorities decode first.
@@ -144,6 +157,9 @@ namespace Swim::Render
 		// A Texture2DArray view of every layer and mip.
 		Rhi::TextureView& GetView() const { return *view; }
 
+		// The same view as a weak reference that expires with the array.
+		std::weak_ptr<Rhi::TextureView> GetSharedView() const { return view; }
+
 		const TextureArrayStats& GetStats() const { return stats; }
 
 	  private:
@@ -159,6 +175,9 @@ namespace Swim::Render
 			std::shared_ptr<const TextureLayerData> Pending;
 			bool PendingPlaceholder = false;
 			std::uint32_t NextMip = 0; // Pending's mips below this are still to send.
+			// Replaces a started or resident image: every mip goes up in one frame, so a layer
+			// set again before its upload finished (flipbooks) cannot restart forever short of mip 0.
+			bool Whole = false;
 			float MinLod = 0.0f;
 		};
 
@@ -169,6 +188,7 @@ namespace Swim::Render
 			int Priority = 0;
 			std::uint64_t Order = 0;
 			std::filesystem::path Path;
+			std::shared_ptr<TextureLayerData> Data; // SetLayer data to finish instead of a file.
 		};
 
 		struct LoadResult
@@ -182,7 +202,13 @@ namespace Swim::Render
 
 		void Check(std::uint32_t layer) const;
 
+		// Throws std::invalid_argument for data Normalize cannot use.
+		void Validate(const TextureLayerData& data) const;
+
+		// Validates, then resizes RGBA8 data and generates its missing mips.
 		void Normalize(TextureLayerData& data) const;
+
+		bool NeedsWork(const TextureLayerData& data) const;
 
 		TextureLayerData MakeSolid() const;
 
@@ -194,12 +220,14 @@ namespace Swim::Render
 
 		void Work();
 
+		void FillPlaceholder(Rhi::Device& device);
+
 		void PollReloads();
 
 		TextureArrayDesc desc;
 		std::uint32_t mipLevels = 1;
 		std::unique_ptr<Rhi::Texture> texture;
-		std::unique_ptr<Rhi::TextureView> view;
+		std::shared_ptr<Rhi::TextureView> view;
 		bool initialized = false;
 		std::vector<Layer> layers;
 		std::deque<std::uint32_t> uploads;

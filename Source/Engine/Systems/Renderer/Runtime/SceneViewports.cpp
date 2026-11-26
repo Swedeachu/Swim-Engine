@@ -341,10 +341,19 @@ namespace Engine
 			return textures;
 		}
 
+		const auto meshOf = [&](const SceneViewportItem& item)
+		{
+			return resolver.Mesh ? resolver.Mesh(item.Mesh) : item.Mesh;
+		};
+		const auto textureOf = [&](const SceneViewportItem& item)
+		{
+			return resolver.Texture && item.Texture ? resolver.Texture(item.Texture) : item.Texture;
+		};
 		const auto resident = [&](const SceneViewportItem& item)
 		{
-			return residency.GetState(item.Mesh) == R::AssetResidencyState::Resident &&
-				(!item.Texture || residency.GetState(item.Texture) == R::AssetResidencyState::Resident);
+			const auto texture = textureOf(item);
+			return residency.GetState(meshOf(item)) == R::AssetResidencyState::Resident &&
+				(!texture || residency.GetState(texture) == R::AssetResidencyState::Resident);
 		};
 
 		for (auto& slot : viewports)
@@ -383,7 +392,7 @@ namespace Engine
 
 				for (const auto& item : scene.Items)
 				{
-					const auto mesh = residency.GetGpuMesh(item.Mesh);
+					const auto mesh = residency.GetGpuMesh(meshOf(item));
 					const auto* metadata = geometry.GetMetadata(mesh);
 
 					if (!metadata || metadata->VertexPage >= pages.Pages.size() || metadata->IndexPage >= pages.Pages.size() ||
@@ -396,7 +405,7 @@ namespace Engine
 					draw.ClipFromLocal = R::MultiplyRowMajor(clipFromWorld, item.Transform);
 					draw.NormalFromLocal = NormalMatrix(item.Transform);
 					draw.Tint = item.Tint;
-					draw.Texture = item.Texture ? residency.GetBindlessIndex(item.Texture) : 0u;
+					draw.Texture = item.Texture ? residency.GetBindlessIndex(textureOf(item)) : 0u;
 					draw.Sampler = item.PointSampled ? materialPoint : materialLinear;
 					draw.AlphaCutoff = item.AlphaCutoff;
 					draw.Lit = item.Lit ? 1u : 0u;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/ScreenSpace/DistanceFog.h"
 #include "Engine/Systems/Renderer/Runtime/RenderFeature.h"
 #include "Engine/Systems/Water/WaterWaves.h"
 
@@ -40,6 +41,9 @@ namespace Engine
 			float Refraction = 1.0f;
 			float Ripples = 1.0f;				 // Normal-only ripples under the shortest wave (0 = none).
 			std::uint32_t ReflectionSteps = 16; // Near the camera; Lod steps them down.
+			// Fog applied at the water's own distance, for scenes that fog the ground in their own
+			// shaders: match their curve. With the screen-space scene fog on, leave it off.
+			DistanceFogSettings Fog;
 		};
 
 		SettingsData Settings;

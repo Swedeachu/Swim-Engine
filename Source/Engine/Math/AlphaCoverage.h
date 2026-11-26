@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -47,17 +48,56 @@ namespace Engine
 			return;
 		}
 
+		// Coverage depends only on each alpha value, so the search runs over a histogram.
+		std::array<std::size_t, 256> histogram{};
+
+		for (std::size_t i = 3; i < rgba.size(); i += 4)
+		{
+			++histogram[std::to_integer<std::uint8_t>(rgba[i])];
+		}
+
+		// Passing is monotonic in alpha: count from the lowest passing value (binary search).
+		std::array<std::size_t, 257> atLeast{};
+
+		for (int a = 255; a >= 0; --a)
+		{
+			atLeast[a] = atLeast[a + 1] + histogram[a];
+		}
+
+		const float threshold = cutoff * 255.0f;
+		const float texels = static_cast<float>(rgba.size() / 4);
+		const auto coverage = [&](float scale)
+		{
+			int first = 0;
+			int last = 256; // The lowest passing alpha is in [first, last]; 256: none passes.
+
+			while (first < last)
+			{
+				const int middle = (first + last) / 2;
+
+				if (static_cast<float>(ScaledAlpha(std::byte(middle), scale)) >= threshold)
+				{
+					last = middle;
+				}
+				else
+				{
+					first = middle + 1;
+				}
+			}
+
+			return static_cast<float>(atLeast[first]) / texels;
+		};
+
 		float low = 0.0f;
 		float high = 16.0f;
 
 		for (int i = 0; i < 16; ++i)
 		{
 			const float middle = 0.5f * (low + high);
-			(AlphaCoverage(rgba, cutoff, middle) < target ? low : high) = middle;
+			(coverage(middle) < target ? low : high) = middle;
 		}
 
-		const float scale =
-			std::abs(AlphaCoverage(rgba, cutoff, low) - target) < std::abs(AlphaCoverage(rgba, cutoff, high) - target) ? low : high;
+		const float scale = std::abs(coverage(low) - target) < std::abs(coverage(high) - target) ? low : high;
 
 		for (std::size_t i = 3; i < rgba.size(); i += 4)
 		{

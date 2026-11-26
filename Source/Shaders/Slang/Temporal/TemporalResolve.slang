@@ -69,7 +69,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		Output[id.xy] = float4(center, 1.0);
 		return;
 	}
-	const float4 sampled = TemporalSampleBilinear(History, width, height, previous);
+	const float4 sampled = TemporalSampleCatmullRom(History, width, height, previous);
 	const float3 clipped = TemporalYCoCgToRgb(TemporalClipToBox(TemporalRgbToYCoCg(TemporalSanitize(sampled)), low, high));
 	const float3 past = max(clipped, float3(0.0, 0.0, 0.0));
 	const float currentWeight = feedback / (1.0 + TemporalLuminance(center));

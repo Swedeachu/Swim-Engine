@@ -108,6 +108,27 @@ namespace Swim::Render
 	{
 		auto& texture = Get(resource, { desc.BaseMipLevel, desc.MipLevelCount, desc.BaseArrayLayer, desc.ArrayLayerCount });
 
+		if (state.Graph.definition->Resources[resource.Index].Poolable())
+		{
+			const Internal::GraphViewKey key{ &texture, desc.Dimension, desc.PixelFormat, desc.BaseMipLevel, desc.MipLevelCount,
+				desc.BaseArrayLayer, desc.ArrayLayerCount, desc.Aspect };
+			auto& cached = state.Views[key];
+
+			if (!cached.View)
+			{
+				cached.View = state.Device.CreateTextureView(texture, desc);
+
+				if (!cached.View)
+				{
+					state.Views.erase(key);
+					throw std::runtime_error("RenderGraph texture view allocation failed");
+				}
+			}
+
+			cached.Used = state.Executions;
+			return *cached.View;
+		}
+
 		auto view = state.Device.CreateTextureView(texture, desc);
 
 		if (!view)

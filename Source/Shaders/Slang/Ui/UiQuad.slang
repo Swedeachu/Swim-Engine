@@ -7,6 +7,7 @@
 // before premultiplied blending. World canvases take coverage ramps and MSDF ranges from
 // screen-space derivatives. Bindings follow UiRenderBindings; Ui::ShadeQuad and Ui::Encode
 // are the CPU definition.
+#include "Features/Glint.slang"
 #include "Ui/UiRecords.slang"
 
 [[vk::binding(0, 0)]] StructuredBuffer<UiQuad> Quads;
@@ -33,7 +34,7 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_
 	const float4 clip = Quads[instanceId].Clip;
 	const float4 uv = Quads[instanceId].Uv;
 	// Sheared glyphs (Ui::ShadeQuad): clipped vertically here, horizontally per fragment.
-	const bool sheared = Quads[instanceId].Kind != UiQuadSolid && Quads[instanceId].Radius != 0.0;
+	const bool sheared = Quads[instanceId].Kind != UiQuadSolid && Quads[instanceId].Kind != UiQuadGradient && Quads[instanceId].Radius != 0.0;
 	float2 low = max(rect.xy, clip.xy);
 	float2 high = max(min(rect.zw, clip.zw), low); // Empty clips collapse to a point.
 	if (sheared)
@@ -89,11 +90,34 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 	{
 		color = q.Color * Textures[NonUniformResourceIndex(q.Texture)].Sample(Samplers[NonUniformResourceIndex(q.Sampler)], input.Uv);
 	}
+	else if (q.Kind == UiQuadImageGlint)
+	{
+		color = q.Color * Textures[NonUniformResourceIndex(q.Texture)].Sample(Samplers[NonUniformResourceIndex(q.Sampler)], input.Uv);
+		// The sheen over the icon's opaque texels, added (premultiplied, alpha unchanged).
+		GlintParams g;
+		g.ColorA = float4(q.BorderColor.rgb, q.BorderColor.a);
+		g.ColorB = float4(lerp(q.BorderColor.rgb, float3(0.3, 0.6, 1.0), 0.6), 1.0);
+		g.Motion = float4(0.35, 1.6, 0.12, Draw.Glint.x);
+		g.Extra = float4(0.0, 5.0, 1.0, 1.0);
+		g.Source = uint4(uint(q.PixelRange + 0.5), uint(q.UnitRange + 0.5), uint(Draw.Glint.y + 0.5), 0u);
+		const float2 cellUv = (input.Uv - q.Uv.xy) / max(abs(q.Uv.zw - q.Uv.xy), float2(1e-6, 1e-6));
+		const float2 cellScale = 1.0 / max(abs(q.Uv.zw - q.Uv.xy), float2(1e-6, 1e-6));
+		const float3 glint = GlintEvaluate(g, Textures[NonUniformResourceIndex(g.Source.y)], Samplers[NonUniformResourceIndex(g.Source.z)],
+			cellUv, uvWidth * cellScale, float2(0.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.0, 0.0, 1.0));
+		color.rgb += glint * color.a;
+	}
 	else
 	{
-		color = UiShadeSolid(q, p, world ? max(0.5 * (canvasWidth.x + canvasWidth.y), 1e-6) : 1.0);
+		UiQuad shaded = q;
+		if (q.Kind == UiQuadGradient)
+		{
+			const float2 size = max(q.Rect.zw - q.Rect.xy, float2(1e-6, 1e-6));
+			const float t = saturate(q.PixelRange > 0.5 ? (p.y - q.Rect.y) / size.y : (p.x - q.Rect.x) / size.x);
+			shaded.Color = lerp(q.Color, q.Uv, t);
+		}
+		color = UiShadeSolid(shaded, p, world ? max(0.5 * (canvasWidth.x + canvasWidth.y), 1e-6) : 1.0);
 	}
-	if (q.Kind != UiQuadSolid && q.Radius != 0.0 && !(p.x >= q.Clip.x && p.x < q.Clip.z))
+	if (q.Kind != UiQuadSolid && q.Kind != UiQuadGradient && q.Radius != 0.0 && !(p.x >= q.Clip.x && p.x < q.Clip.z))
 	{
 		color = float4(0.0, 0.0, 0.0, 0.0);
 	}

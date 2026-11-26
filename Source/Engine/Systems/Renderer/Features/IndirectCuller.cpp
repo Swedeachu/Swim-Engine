@@ -10,6 +10,12 @@ namespace Engine
 
 	namespace
 	{
+		// More than any frame-in-flight count: a replaced buffer outlives every frame that used it.
+		constexpr std::uint32_t RetireFrames = 8;
+	} // namespace
+
+	namespace
+	{
 
 		struct CullView
 		{
@@ -97,6 +103,11 @@ namespace Engine
 		}
 
 		viewCount = static_cast<std::uint32_t>(cullViews.size());
+		std::erase_if(retired,
+			[](auto& entry)
+			{
+				return entry.second-- == 0;
+			});
 		const std::uint64_t historyBytes = std::uint64_t(std::max(count, 1u)) * sizeof(std::uint32_t);
 
 		if (!history || history->GetDesc().Size != historyBytes)
@@ -110,6 +121,13 @@ namespace Engine
 			desc.Size = historyBytes;
 			desc.Usage = Swim::Rhi::BufferUsage::Storage;
 			desc.DebugName = name;
+
+			if (history)
+			{
+				// Earlier frames on other frame slots may still read it.
+				retired.emplace_back(std::move(history), RetireFrames);
+			}
+
 			history = context.Device()->CreateBuffer(desc);
 			cut = true;
 		}

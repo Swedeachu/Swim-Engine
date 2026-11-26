@@ -25,7 +25,7 @@ struct StandardMaterialParameters
 	uint EmissiveTexture;
 	uint MaterialSampler;
 	uint Flags;
-	uint Reserved;
+	float GlintIntensity; // > 0: the view's glint (ForwardView::Glint) is added to the emission, scaled by it.
 };
 
 #endif

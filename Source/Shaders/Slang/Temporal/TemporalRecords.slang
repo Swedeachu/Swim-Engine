@@ -60,6 +60,32 @@ float3 TemporalClipToBox(float3 value, float3 minimum, float3 maximum)
 }
 
 // Temporal::SampleBilinear: clamp-to-edge, from Loads.
+// Temporal::SampleCatmullRom: clamp-to-edge Catmull-Rom from 4 x 4 Loads.
+float4 TemporalSampleCatmullRom(Texture2D<float4> image, uint width, uint height, float2 uv)
+{
+	const float px = uv.x * float(width) - 0.5;
+	const float py = uv.y * float(height) - 0.5;
+	const float fx0 = floor(px);
+	const float fy0 = floor(py);
+	const float tx = px - fx0;
+	const float ty = py - fy0;
+	const float4 wx = float4(0.5 * (-tx * tx * tx + 2.0 * tx * tx - tx), 0.5 * (3.0 * tx * tx * tx - 5.0 * tx * tx + 2.0),
+		0.5 * (-3.0 * tx * tx * tx + 4.0 * tx * tx + tx), 0.5 * (tx * tx * tx - tx * tx));
+	const float4 wy = float4(0.5 * (-ty * ty * ty + 2.0 * ty * ty - ty), 0.5 * (3.0 * ty * ty * ty - 5.0 * ty * ty + 2.0),
+		0.5 * (-3.0 * ty * ty * ty + 4.0 * ty * ty + ty), 0.5 * (ty * ty * ty - ty * ty));
+	float4 result = float4(0.0, 0.0, 0.0, 0.0);
+	for (int j = 0; j < 4; ++j)
+	{
+		const int y = int(clamp(fy0 - 1.0 + float(j), 0.0, float(height - 1)));
+		for (int i = 0; i < 4; ++i)
+		{
+			const int x = int(clamp(fx0 - 1.0 + float(i), 0.0, float(width - 1)));
+			result += image.Load(int3(x, y, 0)) * (wx[i] * wy[j]);
+		}
+	}
+	return result;
+}
+
 float4 TemporalSampleBilinear(Texture2D<float4> image, uint width, uint height, float2 uv)
 {
 	const float px = uv.x * float(width) - 0.5;

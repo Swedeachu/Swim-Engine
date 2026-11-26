@@ -50,8 +50,10 @@ namespace Swim::UI
 		bool Visible(const UiPaintQuad& quad)
 		{
 			const auto visible = Intersect(quad.Bounds, quad.Clip);
-			const bool opaque =
-				quad.Color.A > 0.0f || (quad.Kind == UiPaintKind::Solid && quad.BorderWidth > 0.0f && quad.BorderColor.A > 0.0f);
+			const bool opaque = quad.Color.A > 0.0f ||
+				(quad.Kind == UiPaintKind::Solid &&
+					((quad.BorderWidth > 0.0f && quad.BorderColor.A > 0.0f) ||
+						(quad.Gradient != UiGradient::None && quad.ColorEnd.A > 0.0f)));
 			return opaque && visible.Width > 0.0f && visible.Height > 0.0f;
 		}
 
@@ -83,6 +85,7 @@ namespace Swim::UI
 			base.Texture = image.Texture;
 			base.Sampler = image.Sampler;
 			base.Blend = image.Blend;
+			base.Glint = image.Glint;
 			const auto& slice = image.Slice;
 			const bool sliced = slice.Left > 0.0f || slice.Top > 0.0f || slice.Right > 0.0f || slice.Bottom > 0.0f;
 
@@ -341,6 +344,13 @@ namespace Swim::UI
 		background.CornerRadius = std::min(v.CornerRadius, 0.5f * std::min(node.Bounds.Width, node.Bounds.Height));
 		background.BorderWidth = v.BorderWidth;
 		background.BorderColor = color(v.BorderColor);
+
+		if (s.Gradient != UiGradient::None)
+		{
+			background.Gradient = s.Gradient;
+			background.ColorEnd = color(s.BackgroundEnd);
+		}
+
 		emit(background);
 
 		const UiRect content = Internal::ContentBox(node.Bounds, s.Padding);

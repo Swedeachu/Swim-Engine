@@ -345,6 +345,10 @@ namespace Game
 					SpawnFloaters(static_cast<std::uint32_t>(std::clamp(at(0, 12.0f), 1.0f, 200.0f)),
 						{ at(1, around.x), at(2, around.y), at(3, around.z) });
 				});
+			// sandbox.cutouts [far]: thin alpha-tested cards out to `far` metres.
+			commands->Register("sandbox.cutouts",
+				[this](const std::vector<std::string>& arguments)
+				{ SpawnCutouts(arguments.empty() ? 160.0f : std::clamp(std::strtof(arguments[0].c_str(), nullptr), 10.0f, 1000.0f)); });
 			// sandbox.waterlod <mode> [detail start end] [amplitude start end] [far amplitude]: 0 off,
 			// 1 continuous (default distances or the given ones), 2 a hard cut at the detail start
 			// (no far field), 3 continuous with the debug tint. Applies to wave water.
@@ -1862,6 +1866,87 @@ namespace Game
 			fluid.Surface = Engine::MakeOceanFluidSurface(ocean->Simulation, height);
 			fluid.SurfaceHeight = height;
 			waveFluid = world->AddFluidVolume(std::move(fluid));
+		}
+	}
+
+	void Sandbox::SpawnCutouts(float far)
+	{
+		auto* render = GetRenderServices();
+		const auto* cameras = GetCameraSystem();
+
+		if (!render || !render->HasRenderer() || !cameras)
+		{
+			return;
+		}
+
+		auto texture = render->Meshes->FindTexture("SandboxFlower");
+
+		if (!texture.IsValid())
+		{
+			// 16 x 16: a green stem and leaves, a red bloom; clear texels white.
+			std::vector<std::uint8_t> rgba(16 * 16 * 4, 255);
+
+			for (int y = 0; y < 16; ++y)
+			{
+				for (int x = 0; x < 16; ++x)
+				{
+					auto* t = &rgba[(y * 16 + x) * 4];
+					const bool stem = x == 7 && y >= 6;
+					const bool leaf = (y == 10 && x >= 4 && x <= 6) || (y == 12 && x >= 8 && x <= 10);
+					const bool bloom = (x - 7) * (x - 7) + (y - 4) * (y - 4) <= 5;
+					t[3] = stem || leaf || bloom ? 255 : 0;
+
+					if (bloom)
+					{
+						t[0] = 200, t[1] = 30, t[2] = 30;
+					}
+					else if (stem || leaf)
+					{
+						t[0] = 40, t[1] = 130, t[2] = 40;
+					}
+				}
+			}
+
+			texture = render->Meshes->RegisterTexture("SandboxFlower", 16, 16, rgba);
+		}
+
+		Engine::MaterialDesc desc;
+		desc.Name = "Sandbox flower";
+		desc.Blend = Engine::MaterialBlend::Masked;
+		desc.DoubleSided = true;
+		desc.PointSampled = true;
+		desc.Roughness = 0.4f;
+		desc.BaseColorTexture = texture;
+		const std::uint32_t material = render->Materials->GetOrCreate(desc);
+		auto mesh = render->Meshes->Find("SandboxCard");
+
+		if (!mesh.IsValid())
+		{
+			mesh = render->Meshes->Register("SandboxCard", Engine::ProceduralMeshes::MakePlane(1.0f, 1, 1.0f));
+		}
+
+		const auto& camera = cameras->GetCamera();
+		glm::vec3 forward = camera.GetForward();
+		forward.y = 0.0f;
+		forward = glm::length(forward) > 1.0e-3f ? glm::normalize(forward) : glm::vec3(0, 0, -1);
+		const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
+		const glm::quat upright = glm::angleAxis(glm::radians(90.0f), glm::vec3(1, 0, 0));
+
+		for (float d = 8.0f; d <= far; d *= 1.06f)
+		{
+			for (int i = -6; i <= 6; ++i)
+			{
+				const float spread = d * 0.05f * float(i);
+				const glm::vec3 at = camera.GetPosition() + forward * d + right * spread;
+
+				for (int card = 0; card < 2; ++card)
+				{
+					const glm::quat turn = glm::angleAxis(glm::radians(45.0f + 90.0f * card + 7.0f * float(i)), glm::vec3(0, 1, 0)) * upright;
+					SpawnMesh(*this,
+						{ "Flower card", mesh, material, glm::vec3(at.x, 0.5f, at.z), glm::vec3(1.0f), turn,
+							Swim::Render::RenderObjectFlags::Default | Swim::Render::RenderObjectFlags::Static, { Engine::Tags::Static } });
+				}
+			}
 		}
 	}
 

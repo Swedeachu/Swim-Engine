@@ -26,7 +26,14 @@ namespace Engine
 
 	void Camera::SetRotation(const glm::quat& value)
 	{
-		rotation = glm::normalize(value);
+		const float length = glm::length(value);
+
+		if (!std::isfinite(length) || length < 1.0e-6f)
+		{
+			return; // Keep the last good rotation.
+		}
+
+		rotation = value / length;
 		// Recover yaw/pitch so later relative mouse look continues from here.
 		const glm::vec3 forward = GetForward();
 		pitch = glm::degrees(std::asin(std::clamp(forward.y, -1.0f, 1.0f)));

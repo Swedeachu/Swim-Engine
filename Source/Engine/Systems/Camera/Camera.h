@@ -6,6 +6,7 @@
 #include "Engine/Math/Ray.h"
 
 #include <array>
+#include <cmath>
 #include <optional>
 #include <cstdint>
 
@@ -23,8 +24,15 @@ namespace Engine
 	{
 
 	  public:
-
-		void SetPosition(const glm::vec3& value) { position = value; }
+		// Non-finite values are ignored (the camera keeps its last good pose), so one broken
+		// input never poisons the view and projection.
+		void SetPosition(const glm::vec3& value)
+		{
+			if (std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z))
+			{
+				position = value;
+			}
+		}
 
 		const glm::vec3& GetPosition() const { return position; }
 

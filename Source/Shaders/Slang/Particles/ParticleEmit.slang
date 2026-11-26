@@ -28,9 +28,10 @@ Particle Spawn(ParticleEmitter e, uint particleId)
 	const float3 bitangent = float3(b, axisSign + d.y * d.y * a, -d.y);
 	float3 velocity = (tangent * (cos(phi) * sinTheta) + bitangent * (sin(phi) * sinTheta) + d * cosTheta) * speed;
 	float3 position = float3(0.0, 0.0, 0.0);
+	const bool surface = (e.Flags & ParticleFlagSurface) != 0u;
 	if (e.Shape == ParticleShapeSphere)
 	{
-		const float radius = e.ShapeExtent.x * pow(ParticleRandom(particleId, e.Seed, 4u), 1.0 / 3.0);
+		const float radius = e.ShapeExtent.x * (surface ? 1.0 : pow(ParticleRandom(particleId, e.Seed, 4u), 1.0 / 3.0));
 		const float z = 2.0 * ParticleRandom(particleId, e.Seed, 5u) - 1.0;
 		const float ring = sqrt(max(0.0, 1.0 - z * z));
 		const float angle = 2.0 * ParticlePi * ParticleRandom(particleId, e.Seed, 6u);
@@ -38,8 +39,28 @@ Particle Spawn(ParticleEmitter e, uint particleId)
 	}
 	else if (e.Shape == ParticleShapeBox)
 	{
-		position = e.ShapeExtent * (2.0 * float3(ParticleRandom(particleId, e.Seed, 4u), ParticleRandom(particleId, e.Seed, 5u),
-			ParticleRandom(particleId, e.Seed, 6u)) - 1.0);
+		float3 unit = 2.0 * float3(ParticleRandom(particleId, e.Seed, 4u), ParticleRandom(particleId, e.Seed, 5u),
+			ParticleRandom(particleId, e.Seed, 6u)) - 1.0;
+		if (surface)
+		{
+			// Out to the face of the largest coordinate.
+			const float3 m = abs(unit);
+			const uint axis = m.x >= m.y && m.x >= m.z ? 0u : (m.y >= m.z ? 1u : 2u);
+			unit[axis] = unit[axis] < 0.0 ? -1.0 : 1.0;
+		}
+		position = e.ShapeExtent * unit;
+	}
+	else if (e.Shape == ParticleShapeDisc)
+	{
+		const float radius = e.ShapeExtent.x * (surface ? 1.0 : sqrt(ParticleRandom(particleId, e.Seed, 4u)));
+		const float angle = 2.0 * ParticlePi * ParticleRandom(particleId, e.Seed, 6u);
+		position = float3(radius * cos(angle), 0.0, radius * sin(angle));
+	}
+	if ((e.Flags & (ParticleFlagOutward | ParticleFlagInward)) != 0u)
+	{
+		const float distance = length(position);
+		const float signedSpeed = (e.Flags & ParticleFlagInward) != 0u ? -speed : speed;
+		velocity = (distance > 1.0e-6 ? position / distance : d) * signedSpeed;
 	}
 	p.Size = e.SizeMin + (e.SizeMax - e.SizeMin) * ParticleRandom(particleId, e.Seed, 7u);
 	p.Rotation = e.RotationMin + (e.RotationMax - e.RotationMin) * ParticleRandom(particleId, e.Seed, 8u);

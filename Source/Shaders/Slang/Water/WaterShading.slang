@@ -16,6 +16,7 @@
 // A surface seen from below (the camera under water) gets the transmitted term only.
 #ifndef SWIM_WATER_SHADING_SLANG
 #define SWIM_WATER_SHADING_SLANG
+#include "ScreenSpace/DistanceFog.slang"
 #include "Water/WaterCommon.slang"
 
 struct WaterOptics
@@ -308,6 +309,14 @@ float3 WaterShade(WaterSurface s, WaterOptics o, WaterScene scene)
 		color = lerp(color, o.FoamColor * foamLight, saturate(foam));
 	}
 	return color;
+}
+
+// WaterShade fogged at the surface's own distance with the curve the surrounding ground uses,
+// for scenes that fog in their own shaders (the scene copy behind is already fogged). Set
+// fog.ColorOpacity.rgb per pixel for a sky-coloured fog.
+float3 WaterShade(WaterSurface s, WaterOptics o, WaterScene scene, DistanceFog fog)
+{
+	return DistanceFogApply(fog, WaterShade(s, o, scene), length(Views[0].CameraPosition - s.WorldPosition));
 }
 
 #endif

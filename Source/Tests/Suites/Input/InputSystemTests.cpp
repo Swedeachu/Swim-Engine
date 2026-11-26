@@ -1,3 +1,4 @@
+#include "Engine/Input/ActionMap.h"
 #include "Engine/Input/InputSystem.h"
 #include "Tests/Framework/Test.h"
 
@@ -124,4 +125,40 @@ SWIM_TEST("Input.InputSystem", "FocusLossClearsLiveState")
 
 	SWIM_CHECK(!input.HasFocus());
 	SWIM_CHECK_EQUAL(input.GetGamepadAxis(7, Platform::GamepadAxis::LeftX), 0.0f);
+}
+
+SWIM_TEST("Input.ActionMap", "LookCurveReplacesTheDefaultScaling")
+{
+	using namespace Swim;
+
+	Input::InputSystem input;
+	input.Reset();
+	Platform::InputEvent mouseMove{};
+	mouseMove.Type = Platform::InputEventType::MouseMove;
+	mouseMove.Delta = { 10.0f, -4.0f };
+	input.ProcessInputEvent(mouseMove);
+	input.AdvanceFrame();
+
+	Input::ActionMap actions;
+	actions.SetMouseSensitivity(0.5f);
+	actions.SetLookSetting(80.0f);
+	actions.Update(input);
+	SWIM_CHECK_EQUAL(actions.GetLookDelta().X, 5.0f);
+	SWIM_CHECK_EQUAL(actions.GetRawMouseDelta().X, 10.0f);
+
+	float seenSetting = 0.0f;
+	actions.SetLookCurve(
+		[&](Platform::Float2 counts, float setting)
+		{
+			seenSetting = setting;
+			return Platform::Float2{ counts.X * 0.15f, counts.Y * 0.15f };
+		});
+	actions.SetInvertMouseY(true);
+	const auto look = actions.GetLookDelta();
+	SWIM_CHECK_NEAR(look.X, 1.5f, 1.0e-6f);
+	SWIM_CHECK_NEAR(look.Y, 0.6f, 1.0e-6f); // Inversion applies after the curve.
+	SWIM_CHECK_EQUAL(seenSetting, 80.0f);
+
+	actions.SetLookCurve({});
+	SWIM_CHECK_EQUAL(actions.GetLookDelta().X, 5.0f);
 }

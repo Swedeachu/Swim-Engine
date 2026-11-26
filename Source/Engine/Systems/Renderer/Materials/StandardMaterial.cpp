@@ -26,7 +26,7 @@ namespace Swim::Render
 			{ "EmissiveTexture", T::TextureIndex, 64 },
 			{ "MaterialSampler", T::SamplerIndex, 68 },
 			{ "Flags", T::Uint, 72 },
-			{ "Reserved", T::Uint, 76 },
+			{ "GlintIntensity", T::Float, 76 },
 		};
 		return desc;
 	}

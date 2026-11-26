@@ -355,7 +355,9 @@ namespace Swim::Render
 
 			if (r.Kind == GraphKind::Buffer)
 			{
-				key.push_back(r.Buffer.Size);
+				// Only pooled buffers are allocated from the shape; staged and imported sizes
+				// (uploads that grow and shrink every frame) would otherwise miss the cache.
+				key.push_back(r.Poolable() ? r.Buffer.Size : 0);
 				key.push_back(u(r.Buffer.Usage) | u(r.Buffer.Memory) << 32 | u(r.Buffer.PersistentMap) << 40);
 			}
 			else

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/ScreenSpace/DistanceFog.h"
 #include "Engine/Systems/Renderer/Runtime/RenderFeature.h"
 #include "Engine/Systems/Water/OceanHeightField.h"
 #include "Engine/Systems/Water/WaterWaves.h"
@@ -174,6 +175,14 @@ namespace Engine
 			float Foam = 1.0f;
 			std::array<float, 3> FogColor{ 0.5f, 0.6f, 0.7f }; // Radiance the sea fades into toward the horizon.
 			float FogDensity = 0.0f;						   // Per metre (0 = no fog).
+			// Fog the sea applies itself, for scenes that fog the ground in their own shaders: match
+			// their curve here (DistanceFog.h). With the screen-space scene fog on, leave this off:
+			// the composite fogs the ocean like any opaque surface.
+			FogCurve FogShape = FogCurve::Exponential; // Exponential uses FogDensity; the others FogStart..FogEnd.
+			float FogStart = 0.0f;
+			float FogEnd = 1000.0f;
+			float FogExponent = 3.0f;
+			float FogMaxOpacity = 1.0f;
 			// Continuous LOD: waves lower and the finer cascades flatten with distance, lost
 			// detail becomes roughness, and a flat far-field ring continues past Extent.
 			// Reflection steps do not apply (the frame's reflections shade the ocean).

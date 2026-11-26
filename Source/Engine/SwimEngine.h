@@ -250,6 +250,9 @@ namespace Engine
 		int fpsFrameCounter{ 0 };
 		int fps{ 0 };
 		bool running{ false };
+		static constexpr std::uint32_t MaxFailedFrames = 300; // Consecutive render failures before stopping.
+		std::uint32_t failedFrames = 0;
+		std::string lastFrameError;
 		bool started{ false };
 		bool minimized{ false };
 		bool ownsWindow{ true };

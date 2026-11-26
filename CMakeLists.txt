@@ -557,6 +557,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_runtime_shader(UnderwaterMedium SOURCE Source/Shaders/Slang/Water/Underwater.slang)
 	swim_add_runtime_shader(UnderwaterLens SOURCE Source/Shaders/Slang/Water/Underwater.slang DEFINES UNDERWATER_LENS=1)
 	swim_add_runtime_shader(Lightning SOURCE Source/Shaders/Slang/Features/Lightning.slang)
+	# Fire, smoke, heat haze and molten surfaces (Engine::PyroVolumes, Engine::LavaSurface, Engine::BlockFire).
+	swim_add_runtime_shader(PyroVolumes SOURCE Source/Shaders/Slang/Features/PyroVolumes.slang)
+	swim_add_runtime_shader(LavaSurface SOURCE Source/Shaders/Slang/Features/LavaSurface.slang)
+	swim_add_runtime_shader(BlockFire SOURCE Source/Shaders/Slang/Features/BlockFire.slang)
+	swim_add_runtime_shader(BlockFireProcedural SOURCE Source/Shaders/Slang/Features/BlockFire.slang DEFINES BLOCK_FIRE_PROCEDURAL=1)
+	swim_add_runtime_shader(BlockFireGlow SOURCE Source/Shaders/Slang/Features/BlockFire.slang DEFINES BLOCK_FIRE_GLOW=1)
 	# Sun, moon and night sky (Engine::CelestialSky).
 	swim_add_runtime_shader(CelestialSkyBake SOURCE Source/Shaders/Slang/Features/CelestialSky.slang DEFINES CELESTIAL_BAKE=1)
 	swim_add_runtime_shader(CelestialSky SOURCE Source/Shaders/Slang/Features/CelestialSky.slang)
@@ -1022,6 +1028,17 @@ file(GLOB_RECURSE SWIM_ANIMATION_SOURCES
 	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Animation/*.h
 )
 
+# Scene recording/playback and the MCP-style tool server (Systems/Replay,
+# Systems/Tooling): standard library plus the animation math. Their Runtime/
+# folders (entity scene adapters, socket transports) compile only into SwimEngine.
+file(GLOB_RECURSE SWIM_REPLAY_SOURCES
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Replay/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Replay/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Tooling/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Tooling/*.h
+)
+list(FILTER SWIM_REPLAY_SOURCES EXCLUDE REGEX "/Runtime/")
+
 # Item 79 text/UI runtime. Third-party headers stay in Text implementation
 # files; public contracts, UI layout and paint records use Swim types only.
 # The UI renderer (Renderer/UiRendering: graph pass, atlas residency, CPU
@@ -1439,6 +1456,11 @@ target_link_libraries(SwimEngineRuntime
 		Swim::EnkiTS
 		Threads::Threads
 )
+
+# The tool server's loopback HTTP transport (Systems/Tooling/Runtime).
+if(WIN32)
+	target_link_libraries(SwimEngineRuntime PRIVATE ws2_32)
+endif()
 
 if(SWIM_AUDIO_AVAILABLE)
 	target_link_libraries(SwimEngineRuntime PRIVATE Swim::Miniaudio)

@@ -52,6 +52,7 @@ namespace Swim::Render
 		const UiAtlasFrame* Atlas = nullptr;  // This frame's UiAtlasTextures::Update (glyph pages).
 		std::span<const GraphTexture> Images; // Imported textures behind UiImage handles, declared as sampled reads.
 		bool Clear = false;					  // Clear the target first (overlay-only targets).
+		UiGlint Glint;						  // Images with UiImage::Glint (Mode 0: drawn plain).
 		std::array<float, 4> ClearColor{};
 	};
 

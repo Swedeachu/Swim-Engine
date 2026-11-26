@@ -86,8 +86,8 @@ namespace Engine
 
 		for (std::size_t i = 0; i < textures.size(); ++i)
 		{
-			indices[i] =
-				textures[i].IsValid() ? residency.GetBindlessIndex(textures[i]) : Swim::Render::BindlessResourceTable::FallbackIndex;
+			const auto texture = textureResolver && textures[i].IsValid() ? textureResolver(textures[i]) : textures[i];
+			indices[i] = texture.IsValid() ? residency.GetBindlessIndex(texture) : Swim::Render::BindlessResourceTable::FallbackIndex;
 		}
 
 		if (!force && indices == entry.TextureIndices)
@@ -109,6 +109,7 @@ namespace Engine
 		instance.SetFloat("OcclusionStrength", Finite(d.OcclusionStrength, 1, 0, 1));
 		instance.SetFloat("AlphaCutoff", Finite(d.AlphaCutoff, 0.5f, 0, 1));
 		instance.SetUint("Flags", Flags(d));
+		instance.SetFloat("GlintIntensity", Finite(d.Glint, 0, 0, 8));
 		instance.SetSampler("MaterialSampler", d.PointSampled ? pointSampler : sampler);
 		// A texture that is not resident yet samples the white fallback (element 0), which
 		// the shader treats as "no texture" for the base color and occlusion.

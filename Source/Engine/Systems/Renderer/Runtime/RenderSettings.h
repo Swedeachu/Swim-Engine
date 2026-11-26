@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/Environment/ProceduralSky.h"
+#include "Engine/Systems/Renderer/Features/Glint.h"
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusRecords.h"
 #include "Engine/Systems/Renderer/PostProcess/PostProcessSettings.h"
 #include "Engine/Systems/Renderer/Reflections/PlanarReflectionTypes.h"
@@ -42,6 +43,15 @@ namespace Engine
 	{
 		// Lighting.
 		std::array<float, 3> Ambient{ 0.015f, 0.017f, 0.02f };
+		// Full bright (accessibility, night vision): the lowest diffuse light any opaque
+		// surface lit by the forward passes receives, as radiance on a white surface (0: off;
+		// about 0.3-1 for a scene that is never dark). Lit and shadowed areas keep their
+		// difference above the floor, and the floor itself is shaded by the normal.
+		float MinimumLight = 0.0f;
+		// The sheen of glinting materials (MaterialDesc::Glint) and UI images (UiImage::Glint):
+		// Procedural (enhanced) or Texture (the classic scrolling layers of the texture given to
+		// FrameRenderer::SetGlintTexture), or Off.
+		GlintSettings Glint;
 		bool Environment = true;   // Image-based lighting from the procedural sky.
 		bool SkyBackground = true; // Draw the sky behind the scene (else ClearColor).
 		std::array<float, 3> ClearColor{ 0.02f, 0.02f, 0.025f };
@@ -97,7 +107,7 @@ namespace Engine
 		bool Particles = true;
 		bool TemporalAntiAliasing = true; // Taa only (false: no anti-aliasing while Taa is chosen).
 		AntiAliasingMode AntiAliasing = AntiAliasingMode::Taa;
-		float Sharpening = 0.0f; // Contrast-adaptive sharpening after anti-aliasing, 0..1 (0 = off).
+		float Sharpening = 0.25f;	  // Contrast-adaptive sharpening after anti-aliasing, 0..1 (0 = off); restores what TAA/FXAA soften.
 		bool CinematicEffects = true; // Off: render features with IsCinematic() are skipped.
 		Swim::Render::TemporalSettings Temporal{};
 		Swim::Render::ScreenSpaceSettings ScreenSpace{};
@@ -165,6 +175,9 @@ namespace Engine
 		// Inside "Record and submit": the executor's steps and each pass callback's CPU time.
 		std::vector<PassTiming> RecordPhases;
 		std::vector<PassTiming> RecordPasses;
+		// CPU time of each render feature's PrepareGeometry ("<name>: geometry") and Record
+		// ("<name>: record") this frame; these overlap the CpuPhases that contain them.
+		std::vector<PassTiming> FeaturePhases;
 	};
 
 } // namespace Engine

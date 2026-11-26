@@ -10,6 +10,7 @@
 // already wrote (Specular). Each layer replaces the next by its weight, so the transitions
 // are blends, not switches.
 #include "ScreenSpace/ScreenSpaceRecords.slang"
+#include "ScreenSpace/DistanceFog.slang"
 
 [[vk::binding(0, 0)]] Texture2D<float4> Color;
 [[vk::binding(1, 0)]] Texture2D<float4> Indirect;
@@ -884,12 +885,15 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			inverseView[row] = Params[0].InverseViewRows[row];
 		}
 		FogParams fog;
-		fog.Color = Params[0].FogColor;
-		fog.Density = Params[0].FogDensity;
-		fog.SunColor = Params[0].FogSunColor;
-		fog.HeightFalloff = Params[0].FogHeightFalloff;
-		fog.SunDirection = Params[0].FogSunDirection;
-		fog.BaseHeight = Params[0].FogBaseHeight;
+		const float4 colorDensity = Params[0].FogColorDensity;
+		const float4 sunColorFalloff = Params[0].FogSunColorFalloff;
+		const float4 sunDirectionBase = Params[0].FogSunDirectionBase;
+		fog.Color = colorDensity.xyz;
+		fog.Density = colorDensity.w;
+		fog.SunColor = sunColorFalloff.xyz;
+		fog.HeightFalloff = sunColorFalloff.w;
+		fog.SunDirection = sunDirectionBase.xyz;
+		fog.BaseHeight = sunDirectionBase.w;
 		fog.Anisotropy = Params[0].FogAnisotropy;
 		fog.StartDistance = Params[0].FogStartDistance;
 		fog.MaxDistance = Params[0].FogMaxDistance;
@@ -907,7 +911,11 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			{
 				const float3 direction = delta * (1.0 / distanceToPoint);
 				const float fogDistance = depth > 0.0 ? min(distanceToPoint, fog.MaxDistance) : fog.MaxDistance;
-				const float transmittance = exp(-FogOpticalDepth(fog, camera, direction, fogDistance));
+				const float4 curve = Params[0].FogCurve;
+				const uint shape = uint(curve.x);
+				const float amount = shape == DistanceFogExponential ? 1.0 - exp(-FogOpticalDepth(fog, camera, direction, fogDistance))
+																	 : DistanceFogShape(shape, fog.StartDistance, curve.y, 0.0, curve.z, fogDistance);
+				const float transmittance = 1.0 - curve.w * amount;
 				const float3 inscatter = fog.Color + fog.SunColor * HenyeyGreenstein(fog.Anisotropy, -dot(fog.SunDirection, direction));
 				c = c * transmittance + inscatter * (1.0 - transmittance);
 				reflectionTerm.a *= transmittance;

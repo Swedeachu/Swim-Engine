@@ -4,6 +4,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/Internal/GraphExecutionState.h"
 #include "Engine/Systems/Renderer/RenderGraph/Internal/GraphValidation.h"
 #include <algorithm>
+#include <unordered_map>
 
 namespace Swim::Render
 {
@@ -44,6 +45,7 @@ namespace Swim::Render
 		state->Retained.clear();
 		state->Tables.clear();
 		state->Queries.reset();
+		state->Views.clear();
 		state->Pool.clear();
 		state->ReadbackSlices.clear();
 		state->Upload.reset();
@@ -60,18 +62,29 @@ namespace Swim::Render
 
 		if (keep)
 		{
+			std::unordered_map<const Rhi::RhiObject*, std::size_t> retained;
+			retained.reserve(state->Retained.size());
+
+			for (std::size_t i = 0; i < state->Retained.size(); ++i)
+			{
+				retained.emplace(state->Retained[i].get(), i);
+			}
+
 			for (const auto& issued : state->IssuedTables)
 			{
-				const auto found = std::find_if(state->Retained.begin(), state->Retained.end(),
-					[&](const auto& object)
-					{
-						return object.get() == issued.Table;
-					});
-				auto* table = found != state->Retained.end() ? dynamic_cast<Rhi::DescriptorTable*>(found->get()) : nullptr;
+				const auto at = retained.find(issued.Table);
+
+				if (at == retained.end() || !state->Retained[at->second])
+				{
+					continue;
+				}
+
+				auto& slot = state->Retained[at->second];
+				auto* table = dynamic_cast<Rhi::DescriptorTable*>(slot.get());
 
 				if (table && !state->Tables.contains(issued.Key) && table->ReopenForWrites())
 				{
-					found->release();
+					slot.release();
 					state->Tables[issued.Key] = { issued.Layout, issued.Space, std::unique_ptr<Rhi::DescriptorTable>(table) };
 				}
 			}
@@ -116,6 +129,7 @@ namespace Swim::Render
 		state->TablesShape.reset();
 		state->Queries.reset();
 		state->Resources.clear();
+		state->Views.clear();
 		state->Pool.clear();
 		state->PoolShape.reset();
 		state->Ranges.clear();
@@ -192,6 +206,8 @@ namespace Swim::Render
 		state->Retained.clear();
 		// The timestamp pool is kept while it is large enough (it is reset in the command list).
 		state->HasResult = false;
+		lastTimings.Reset = ms(mark, Clock::now());
+		mark = Clock::now();
 
 		state->Graph = graph; // Own the immutable description and callbacks through completion.
 		state->Resources.assign(graph.definition->Resources.size(), nullptr);
@@ -201,6 +217,20 @@ namespace Swim::Render
 		// Same shape as last time: the pool already holds this graph's transients, in order.
 		const bool samePool = graph.shape == state->PoolShape;
 		std::size_t pooled = 0;
+		const auto execution = ++state->Executions;
+
+		if (!samePool)
+		{
+			state->Views.clear(); // Before their textures can be dropped below.
+		}
+		else
+		{
+			std::erase_if(state->Views,
+				[&](const auto& entry)
+				{
+					return entry.second.Used + 1 < execution;
+				});
+		}
 
 		for (auto r : graph.shape->Allocations)
 		{
@@ -336,13 +366,16 @@ namespace Swim::Render
 					state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::Begin);
 				}
 
+				const auto barrierStart = Clock::now();
+
 				for (const auto& barrier : scheduled.Barriers)
 				{
 					RecordBarrier(barrier);
 				}
 
-				RenderCommandContext context(*state, scheduled.Pass);
 				const auto passStart = Clock::now();
+				lastTimings.Barriers += ms(barrierStart, passStart);
+				RenderCommandContext context(*state, scheduled.Pass);
 				pass.Execute(context);
 				lastTimings.Passes.push_back(
 					{ pass.Name, std::chrono::duration<double, std::nano>(Clock::now() - passStart).count(), std::nullopt });

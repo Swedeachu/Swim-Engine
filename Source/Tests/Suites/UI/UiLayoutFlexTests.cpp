@@ -2,6 +2,7 @@
 #include "Tests/Fixtures/TextFontFixture.h"
 #include "Tests/Framework/Test.h"
 
+#include <limits>
 #include <stdexcept>
 
 using namespace Swim::UI;
@@ -135,15 +136,21 @@ SWIM_TEST("UI.Layout", "OverlayAlignmentAnchorsPivotsAndAspectRatio")
 	SWIM_CHECK_NEAR(ui.GetBounds(image).Height, 60.0f, 1e-3f);
 	SWIM_CHECK_NEAR(ui.GetBounds(portrait).Width, 15.0f, 1e-3f);
 
+	// Out-of-range values are clamped (unknown enums take the default) instead of failing.
 	auto invalid = Box(10, 10);
 	invalid.AnchorMin = { 1.5f, 0 };
-	SWIM_CHECK_THROWS(ui.SetStyle(image, invalid), std::invalid_argument);
+	ui.SetStyle(image, invalid);
+	SWIM_CHECK_EQUAL(ui.GetStyle(image).AnchorMin.X, 1.0f);
 	invalid = Box(10, 10);
 	invalid.Grow = -1;
-	SWIM_CHECK_THROWS(ui.SetStyle(image, invalid), std::invalid_argument);
+	ui.SetStyle(image, invalid);
+	SWIM_CHECK_EQUAL(ui.GetStyle(image).Grow, 0.0f);
 	invalid = Box(10, 10);
 	invalid.Justify = static_cast<UiJustify>(99);
-	SWIM_CHECK_THROWS(ui.SetStyle(image, invalid), std::invalid_argument);
+	invalid.Width = UiLength::Percent(3.0f);
+	SWIM_CHECK(SanitizeUiStyle(invalid));
+	SWIM_CHECK(invalid.Justify == UiJustify::Start && invalid.Width.Value == 1.0f);
+	SWIM_CHECK(!SanitizeUiStyle(invalid));
 }
 
 SWIM_TEST("UI.Layout", "MeasureAndPaintCachesSkipUnchangedNodes")
@@ -315,7 +322,9 @@ SWIM_TEST("UI.Paint", "RoundedBordersImagesAndNineSlices")
 	ui.Layout({ 400, 400 });
 	SWIM_CHECK_NEAR(ui.GetBounds(natural).Width, 0.0f, 1e-5f);
 	image.SliceUv.Left = 2.0f;
-	SWIM_CHECK_THROWS(ui.SetImage(frame, image), std::invalid_argument);
+	image.Tint.A = std::numeric_limits<float>::quiet_NaN();
+	ui.SetImage(frame, image);
+	SWIM_CHECK(SanitizeUiImage(image) && image.SliceUv.Left == 1.0f && image.Tint.A == 1.0f);
 }
 
 SWIM_TEST("UI.Text", "WrappedPercentWidthLabelsPushTheirSiblingsDown")

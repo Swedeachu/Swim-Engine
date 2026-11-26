@@ -132,11 +132,28 @@ namespace Swim::Input
 		// positive - negative, for paired directional actions (move left/right).
 		float GetAxis(ActionId positive, ActionId negative) const { return GetValue(positive) - GetValue(negative); }
 
-		// This frame's relative mouse motion scaled by the sensitivity, Y inverted when set,
-		// with no acceleration; zero while `context` is not live.
+		// This frame's relative mouse motion scaled by the sensitivity (or the look curve),
+		// Y inverted when set; zero while `context` is not live.
 		Platform::Float2 GetLookDelta(InputContextId context = DefaultContext) const;
 
+		// The default scaling: look units per mouse count.
 		void SetMouseSensitivity(float value) { mouseSensitivity = value; }
+
+		// The raw sensitivity setting (look_sensitivity, 0..100) handed to the look curve.
+		void SetLookSetting(float value) { lookSetting = value; }
+
+		float GetLookSetting() const { return lookSetting; }
+
+		// A game's own sensitivity curve: this frame's raw mouse counts and the raw setting in,
+		// look delta out (in whatever unit the game turns by, for example degrees), used
+		// instead of the default scaling. Y inversion still applies afterwards. Empty
+		// restores the default.
+		using LookCurve = std::function<Platform::Float2(Platform::Float2 counts, float setting)>;
+
+		void SetLookCurve(LookCurve curve) { lookCurve = std::move(curve); }
+
+		// This frame's raw relative mouse motion (counts), whatever the context.
+		Platform::Float2 GetRawMouseDelta() const { return mouseDelta; }
 
 		void SetInvertMouseY(bool value) { invertMouseY = value; }
 
@@ -175,6 +192,8 @@ namespace Swim::Input
 		InputContextId textContext = InvalidInputContext;
 		Platform::Float2 mouseDelta{};
 		float mouseSensitivity = 1.0f;
+		float lookSetting = 50.0f;
+		LookCurve lookCurve;
 		bool invertMouseY = false;
 		std::function<void()> changed;
 

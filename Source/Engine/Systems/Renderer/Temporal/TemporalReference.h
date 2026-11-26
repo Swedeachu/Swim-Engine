@@ -61,6 +61,10 @@ namespace Swim::Render::Temporal
 	// Clamp-to-edge bilinear filter at uv (texel centres at (i + 0.5) / size), from Loads.
 	Float4 SampleBilinear(const ColorImage& image, const Float2& uv);
 
+	// Clamp-to-edge Catmull-Rom (4 x 4 Loads) at uv: the history filter. Bilinear history
+	// softens the image a little every frame and the loss accumulates into blur.
+	Float4 SampleCatmullRom(const ColorImage& image, const Float2& uv);
+
 	struct Neighborhood
 	{
 		Float3 Center;	// Sanitized current color.

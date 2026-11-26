@@ -278,8 +278,9 @@ SWIM_TEST("UI.Layout", "HiddenNodesClearBoundsAndInvalidInputLeavesTreeUsable")
 	SWIM_CHECK_EQUAL(ui.GetBounds(child).Width, 0.0f);
 	style.Visible = true;
 	style.Gap = std::numeric_limits<float>::quiet_NaN();
-	SWIM_CHECK_THROWS(ui.SetStyle(child, style), std::invalid_argument);
-	SWIM_CHECK(!ui.GetStyle(child).Visible);
+	ui.SetStyle(child, style); // Clamped, not fatal: NaN takes the default.
+	SWIM_CHECK(ui.GetStyle(child).Visible && ui.GetStyle(child).Gap == 0.0f);
+	ui.Layout({ 100, 100 });
 	SWIM_CHECK_THROWS(ui.Layout({ 100, 100 }, 0), std::invalid_argument);
 	SWIM_CHECK_THROWS(ui.SetScroll(child, { 0, std::numeric_limits<float>::infinity() }), std::invalid_argument);
 	SWIM_CHECK(!ui.HitTest({ std::numeric_limits<float>::quiet_NaN(), 0 }));

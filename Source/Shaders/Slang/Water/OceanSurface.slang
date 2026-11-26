@@ -3,6 +3,7 @@
 // lights, shadows and image-based reflections. Quad spacing grows in proportion to the
 // distance from the centre: offset(u) = sign(u) * scale * (exp(rate * |u|) - 1) for u in -1..1.
 #include "ForwardPlus/ForwardFrame.slang"
+#include "ScreenSpace/DistanceFog.slang"
 #include "Water/WaterCommon.slang"
 #include "Water/WaterWaves.slang"
 
@@ -17,10 +18,10 @@ struct OceanSurfaceParams
 	float4 FoamColor;	 // w: foam strength.
 	float4 SunDirection; // Toward the sun; w: ambient scatter strength.
 	float4 SunColor;	 // Sun radiance; w: crest height scatter scale (1/m).
-	float4 FogColor;	 // Fog radiance; w: density (1/m).
 	float4 Ambient;		 // rgb: sky radiance seen by the water body; w: previous displacement valid (motion vectors).
 	WaterLodGpu Lod;	 // Continuous LOD (Engine::WaterLodSettings).
 	float4 Far;			 // x: far-field extent (0: none), y: grid extent (m).
+	DistanceFog Fog;	 // Fog the sea applies itself (off with the scene fog).
 };
 
 // Cascade weights at a distance: all lower with Amplitude; the finer two flatten with Detail.
@@ -189,8 +190,8 @@ ForwardOpaqueTargets fragmentMain(VertexOutput input)
 	surface.Thin = false;
 
 	ForwardLighting lit = ForwardLightSurface(view, Grid[0], surface, input.WorldPosition, input.Position.xy);
-	const float fog = 1.0 - exp(-viewDistance * p.FogColor.w);
-	lit.Radiance = lerp(lit.Radiance, p.FogColor.rgb, fog);
+	const float fog = DistanceFogAmount(p.Fog, viewDistance);
+	lit.Radiance = lerp(lit.Radiance, p.Fog.ColorOpacity.rgb, fog);
 	lit.Indirect *= 1.0 - fog;
 	lit.Reflectance *= 1.0 - fog;
 	lit.Specular *= 1.0 - fog;

@@ -62,9 +62,10 @@ namespace Swim::Render
 		float ReflectionTemporalBlend = 0.3f; // Weight of this frame's term, (0, 1].
 		std::uint32_t PlanarCount = 0; // Active planar reflection records (ScreenSpaceFrame::Planar).
 		float SsrMaxFootprint = 0.0f; // ReflectionSettings::MaxFootprint (0: off).
+		float FogCurve[4] = { 0, 1000, 3, 1 }; // FogSettings: curve, end distance, exponent, max opacity.
 	};
 
-	static_assert(sizeof(GpuScreenSpaceParams) == 432);
+	static_assert(sizeof(GpuScreenSpaceParams) == 448);
 	static_assert(offsetof(GpuScreenSpaceParams, AoRadius) == 176 && offsetof(GpuScreenSpaceParams, FogColor) == 224);
 	static_assert(offsetof(GpuScreenSpaceParams, Projection) == 288 && offsetof(GpuScreenSpaceParams, SsrMaxSteps) == 384);
 

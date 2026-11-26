@@ -57,6 +57,10 @@ struct ParticleEmitter
 	float4 ColorTimes;
 	float4 ColorValues[4];
 	float4 UvRect;
+	uint Facing;
+	float Stretch;
+	float AspectMin;
+	float AspectMax;
 };
 
 struct ParticleCounters
@@ -85,8 +89,19 @@ static const uint ParticleFlagCollision = 1u << 1;
 static const uint ParticleFlagSorted = 1u << 2;
 static const uint ParticleFlagTextured = 1u << 3;
 static const uint ParticleFlagRandomFrame = 1u << 4;
+static const uint ParticleFlagSurface = 1u << 5;
+static const uint ParticleFlagOutward = 1u << 6;
+static const uint ParticleFlagInward = 1u << 7;
+static const uint ParticleFlagExpireOnContact = 1u << 8;
+static const uint ParticleFlagFlipbookClamp = 1u << 9;
+static const uint ParticleFlagMaterialShift = 12u;
 static const uint ParticleShapeSphere = 1u;
 static const uint ParticleShapeBox = 2u;
+static const uint ParticleShapeDisc = 3u;
+static const uint ParticleFacingVelocity = 1u;
+static const uint ParticleFacingUprightY = 2u;
+static const uint ParticleFacingHorizontal = 3u;
+static const uint ParticleFacingEmitter = 4u;
 static const float ParticlePi = 3.14159265358979;
 
 // Particles::Hash (PCG).

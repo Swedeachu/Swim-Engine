@@ -122,6 +122,14 @@ namespace Swim::UI
 		SpaceEvenly
 	};
 
+	// A background fading from Background to BackgroundEnd across the node.
+	enum class UiGradient : std::uint8_t
+	{
+		None,
+		Horizontal, // Left to right.
+		Vertical,	// Top to bottom.
+	};
+
 	struct UiStyle
 	{
 		UiLength Width;
@@ -154,6 +162,10 @@ namespace Swim::UI
 		bool HitTest = false;
 		bool Focusable = false;
 		UiColor Background;
+		// Paint-only: with a Gradient the background fades to BackgroundEnd (straight alpha,
+		// linear; interpolated premultiplied). Not eased by transitions or state rules.
+		UiGradient Gradient = UiGradient::None;
+		UiColor BackgroundEnd;
 		// Rounded background and an inner border; paint-only (no layout change).
 		float CornerRadius = 0.0f;
 		float BorderWidth = 0.0f;
@@ -175,6 +187,11 @@ namespace Swim::UI
 		// directional navigation (still focusable by pointer or Focus()).
 		std::int32_t TabIndex = 0;
 	};
+
+	// Clamp every value into its valid range; non-finite values and unknown enums take the
+	// default. True when anything changed. SetStyle and SetImage apply these, so data-driven
+	// UI never fails at run time; themes still reject invalid values when they load.
+	bool SanitizeUiStyle(UiStyle& style);
 
 	struct UiNodeId
 	{
@@ -214,7 +231,12 @@ namespace Swim::UI
 		UiColor Tint{ 1, 1, 1, 1 }; // Straight alpha, linear.
 		UiImageFit Fit = UiImageFit::Stretch;
 		UiBlend Blend = UiBlend::Normal;
+		// Enchanted-style sheen over the opaque texels (0 none, 1 full), animated by the
+		// renderer (RenderSettings::Glint).
+		float Glint = 0.0f;
 	};
+
+	bool SanitizeUiImage(UiImage& image);
 
 	// Interaction state of a node, taken from its nearest interactive ancestor-or-self
 	// (hit-testable, focusable, editable or a control), so a control's parts and a
@@ -515,6 +537,9 @@ namespace Swim::UI
 		UiRect Bounds; // Logical units, top left origin, positive down.
 		UiRect Clip;
 		UiColor Color; // Premultiplied linear RGBA (the tint for images).
+		// Solid: a gradient from Color to ColorEnd (premultiplied) across Bounds.
+		UiGradient Gradient = UiGradient::None;
+		UiColor ColorEnd;
 		std::uint32_t AtlasPage = Text::NoAtlasPage;
 		UiRect Uv;					// Normalized, top-down atlas/texture coordinates.
 		float DistanceRange = 0.0f; // Atlas texels; renderer uses derivatives for screen coverage.
@@ -529,6 +554,7 @@ namespace Swim::UI
 		float Shear = 0.0f;
 		float ShearPivotY = 0.0f;
 		UiBlend Blend = UiBlend::Normal; // Images only.
+		float Glint = 0.0f;				 // Images only: UiImage::Glint.
 	};
 
 	enum class UiEventKind : std::uint8_t

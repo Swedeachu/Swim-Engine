@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -14,6 +15,23 @@ namespace Swim::Render
 	// Bitmap-font glyph from a colour atlas page: straight-alpha sRGB texels (nearest
 	// sampler), decoded and premultiplied, times the tint.
 	inline constexpr std::uint32_t UiQuadColorGlyph = 3;
+	// An image with a glint over its opaque texels: BorderColor is the glint colour (rgb) and
+	// strength (a), PixelRange the mode (1 procedural, 2 texture), UnitRange the glint
+	// texture's bindless index; the time and repeating sampler are in GpuUiDrawConstants::Glint.
+	inline constexpr std::uint32_t UiQuadImageGlint = 4;
+	// A solid whose colour fades from Color to Uv (premultiplied RGBA) across Rect: left to
+	// right, or top to bottom when PixelRange is 1. Corners and border as for solids.
+	inline constexpr std::uint32_t UiQuadGradient = 5;
+
+	// The glint UI images with UiImage::Glint get (UiRenderFrame::Glint).
+	struct UiGlint
+	{
+		std::uint32_t Mode = 0;								   // 0 off, 1 procedural, 2 texture (Engine::GpuGlint::Source.x).
+		std::array<float, 4> Color{ 0.55f, 0.3f, 1.0f, 0.3f }; // rgb; a: intensity.
+		std::uint32_t Texture = 0;							   // Bindless glint texture (Texture mode).
+		std::uint32_t Sampler = 0;							   // Bindless repeating sampler (Texture mode).
+		float Time = 0.0f;									   // Seconds.
+	};
 
 	// GpuUiQuad::Blend: the pipeline a quad is drawn with (the shader ignores it).
 	inline constexpr std::uint32_t UiQuadBlendNormal = 0; // Premultiplied over.
@@ -61,7 +79,7 @@ namespace Swim::Render
 		float WhiteScale = 1.0f;	// Linear/scRGB: multiplier; HDR10: nits of UI white.
 		std::uint32_t Flags = 0;	// UiDrawWorld.
 		float Opacity = 1.0f;		// Canvas fade, multiplies every premultiplied color.
-		float Reserved[2] = {};
+		float Glint[2] = {};		// UiQuadImageGlint: time (s), bindless repeating sampler index (as a float).
 	};
 
 	static_assert(sizeof(GpuUiDrawConstants) == 96);

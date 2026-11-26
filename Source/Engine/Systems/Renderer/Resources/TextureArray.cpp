@@ -104,8 +104,7 @@ namespace Swim::Render
 
 		std::uint8_t LinearToSrgb(float value)
 		{
-			value = std::clamp(value, 0.0f, 1.0f);
-			return static_cast<std::uint8_t>(std::lround(::Engine::LinearToSrgb(value) * 255.0f));
+			return ::Engine::LinearToSrgb8(value);
 		}
 
 		std::vector<std::byte> Downsample(const std::vector<std::byte>& source, std::uint32_t width, std::uint32_t height, bool srgb)
@@ -125,23 +124,40 @@ namespace Swim::Render
 				{
 					const std::uint32_t columns[2] = { std::min(x * 2, width - 1), std::min(x * 2 + 1, width - 1) };
 
-					for (std::uint32_t channel = 0; channel < 4; ++channel)
+					// sRGB colour is averaged by alpha, so clear texels (often white or black) never
+					// bleed into cut-out edges at a distance; data (linear, whose alpha may be
+					// anything) and alpha take the plain average.
+					float colour[3] = {};
+					float plain[3] = {};
+					float alpha = 0.0f;
+
+					for (const auto row : rows)
 					{
-						float sum = 0.0f;
-
-						for (const auto row : rows)
+						for (const auto column : columns)
 						{
-							for (const auto column : columns)
-							{
-								const auto value = in[(std::size_t(row) * width + column) * 4 + channel];
-								sum += srgb && channel < 3 ? toLinear[value] : static_cast<float>(value) / 255.0f;
-							}
-						}
+							const auto* texel = in + (std::size_t(row) * width + column) * 4;
+							const float a = static_cast<float>(texel[3]) / 255.0f;
 
-						sum *= 0.25f;
-						to[(std::size_t(y) * outWidth + x) * 4 + channel] =
-							srgb && channel < 3 ? LinearToSrgb(sum) : static_cast<std::uint8_t>(std::lround(std::clamp(sum, 0.0f, 1.0f) * 255.0f));
+							for (int c = 0; c < 3; ++c)
+							{
+								const float value = srgb ? toLinear[texel[c]] : static_cast<float>(texel[c]) / 255.0f;
+								colour[c] += value * a;
+								plain[c] += value;
+							}
+
+							alpha += a;
+						}
 					}
+
+					auto* out = to + (std::size_t(y) * outWidth + x) * 4;
+
+					for (int c = 0; c < 3; ++c)
+					{
+						const float value = srgb && alpha > 0.0f ? colour[c] / alpha : plain[c] * 0.25f;
+						out[c] = srgb ? LinearToSrgb(value) : static_cast<std::uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+					}
+
+					out[3] = static_cast<std::uint8_t>(std::clamp(alpha * 0.25f, 0.0f, 1.0f) * 255.0f + 0.5f);
 				}
 			}
 
@@ -220,6 +236,7 @@ namespace Swim::Render
 		viewDesc.ArrayLayerCount = desc.Layers;
 		viewDesc.DebugName = desc.DebugName;
 		view = device.CreateTextureView(*texture, viewDesc);
+		FillPlaceholder(device);
 
 		layers.resize(desc.Layers);
 		stats.Layers = desc.Layers;
@@ -231,6 +248,68 @@ namespace Swim::Render
 
 		decoder = &TextureArray::DecodeFile;
 		worker = std::thread([this] { Work(); });
+	}
+
+	void TextureArray::FillPlaceholder(Rhi::Device& device)
+	{
+		// Every layer and mip holds the placeholder and is shader-readable from creation, so a
+		// view sampled before the first Import never reads an undefined image. Without a timeline
+		// (headless mocks) the first Import fills it in the graph instead.
+		const auto solid = MakeSolid();
+		std::vector<std::uint64_t> offsets;
+		std::uint64_t bytes = 0;
+
+		for (const auto& mip : solid.Mips)
+		{
+			offsets.push_back(bytes);
+			bytes = AlignUp(bytes + mip.size(), 16);
+		}
+
+		const std::string name = desc.DebugName + " placeholder";
+		auto staging = device.CreateBuffer({ bytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, name });
+		auto pool = device.CreateCommandPool(Rhi::QueueType::Graphics);
+		// A timeline, not a fence: with the submission thread the submit happens on another thread,
+		// and a host wait on a timeline may start before it.
+		std::shared_ptr<Rhi::Timeline> done(device.CreateTimeline(0));
+		auto commands = pool ? pool->CreateCommandList() : nullptr;
+
+		if (!staging || !done || !commands)
+		{
+			return;
+		}
+
+		for (std::uint32_t mip = 0; mip < mipLevels; ++mip)
+		{
+			staging->Write(offsets[mip], std::as_bytes(std::span(solid.Mips[mip])));
+		}
+
+		commands->Begin();
+		commands->Transition(*texture, S::Undefined, S::CopyDestination);
+
+		for (std::uint32_t layer = 0; layer < desc.Layers; ++layer)
+		{
+			for (std::uint32_t mip = 0; mip < mipLevels; ++mip)
+			{
+				commands->CopyBufferToTexture(*staging, *texture,
+					{ offsets[mip], { mip, layer }, {}, { MipExtent(desc.Width, mip), MipExtent(desc.Height, mip), 1 } });
+			}
+		}
+
+		commands->Transition(*texture, S::CopyDestination, S::ShaderRead);
+		commands->End();
+		Rhi::CommandList* const lists[] = { commands.get() };
+		Rhi::SubmitDesc submit;
+		submit.CommandLists = lists;
+		const Rhi::TimelinePoint signal{ done.get(), 1 };
+		submit.SignalTimelines = { &signal, 1 };
+		device.GetQueue(Rhi::QueueType::Graphics).Submit(submit);
+
+		if (!done->Wait(1))
+		{
+			throw std::runtime_error(desc.DebugName + ": the placeholder fill did not complete");
+		}
+
+		initialized = true;
 	}
 
 	TextureArray::~TextureArray()
@@ -252,7 +331,7 @@ namespace Swim::Render
 		}
 	}
 
-	void TextureArray::Normalize(TextureLayerData& data) const
+	void TextureArray::Validate(const TextureLayerData& data) const
 	{
 		const auto fail = [&](const char* why)
 		{
@@ -269,11 +348,6 @@ namespace Swim::Render
 			fail("layer data is not in the array's format family");
 		}
 
-		if (data.Mips.size() > mipLevels)
-		{
-			data.Mips.resize(mipLevels);
-		}
-
 		if (IsRgba8(data.Format))
 		{
 			if (data.Mips[0].size() != std::size_t(data.Width) * data.Height * 4)
@@ -281,20 +355,58 @@ namespace Swim::Render
 				fail("RGBA8 mip 0 does not match its size");
 			}
 
+			// Resized data keeps only mip 0, so its other mips are not checked.
+			if (data.Width == desc.Width && data.Height == desc.Height)
+			{
+				for (std::uint32_t mip = 1; mip < std::min<std::size_t>(data.Mips.size(), mipLevels); ++mip)
+				{
+					if (data.Mips[mip].size() != std::size_t(MipExtent(desc.Width, mip)) * MipExtent(desc.Height, mip) * 4)
+					{
+						fail("an RGBA8 mip does not match its size");
+					}
+				}
+			}
+
+			return;
+		}
+
+		if (data.Width != desc.Width || data.Height != desc.Height || data.Mips.size() < mipLevels)
+		{
+			fail("BC7 layer data must match the array's size and carry every mip");
+		}
+
+		for (std::uint32_t mip = 0; mip < mipLevels; ++mip)
+		{
+			if (data.Mips[mip].size() !=
+				Rhi::GetTransferRegionBytes(desc.Format, MipExtent(desc.Width, mip), MipExtent(desc.Height, mip), 1))
+			{
+				fail("a BC7 mip does not match its size");
+			}
+		}
+	}
+
+	bool TextureArray::NeedsWork(const TextureLayerData& data) const
+	{
+		return IsRgba8(data.Format) && (data.Width != desc.Width || data.Height != desc.Height || data.Mips.size() < mipLevels);
+	}
+
+	void TextureArray::Normalize(TextureLayerData& data) const
+	{
+		Validate(data);
+
+		if (data.Mips.size() > mipLevels)
+		{
+			data.Mips.resize(mipLevels);
+		}
+
+		if (IsRgba8(data.Format))
+		{
 			if (data.Width != desc.Width || data.Height != desc.Height)
 			{
 				data.Mips[0] = Resample(data.Mips[0], data.Width, data.Height, desc.Width, desc.Height);
 				data.Mips.resize(1);
 				data.Width = desc.Width;
 				data.Height = desc.Height;
-			}
-
-			for (std::uint32_t mip = 1; mip < data.Mips.size(); ++mip)
-			{
-				if (data.Mips[mip].size() != std::size_t(MipExtent(desc.Width, mip)) * MipExtent(desc.Height, mip) * 4)
-				{
-					fail("an RGBA8 mip does not match its size");
-				}
 			}
 
 			const std::size_t given = data.Mips.size();
@@ -316,19 +428,6 @@ namespace Swim::Render
 			}
 
 			return;
-		}
-
-		if (data.Width != desc.Width || data.Height != desc.Height || data.Mips.size() < mipLevels)
-		{
-			fail("BC7 layer data must match the array's size and carry every mip");
-		}
-
-		for (std::uint32_t mip = 0; mip < mipLevels; ++mip)
-		{
-			if (data.Mips[mip].size() != Rhi::GetTransferRegionBytes(desc.Format, MipExtent(desc.Width, mip), MipExtent(desc.Height, mip), 1))
-			{
-				fail("a BC7 mip does not match its size");
-			}
 		}
 	}
 
@@ -368,6 +467,7 @@ namespace Swim::Render
 	{
 		auto& slot = layers[layer];
 		const bool queued = slot.Pending != nullptr;
+		slot.Whole = slot.Whole || slot.HasImage || (queued && slot.NextMip < mipLevels);
 		slot.Pending = std::move(data);
 		slot.PendingPlaceholder = placeholder;
 		slot.NextMip = mipLevels;
@@ -419,9 +519,56 @@ namespace Swim::Render
 	void TextureArray::SetLayer(std::uint32_t layer, TextureLayerData data)
 	{
 		Check(layer);
-		Normalize(data);
 		auto& slot = layers[layer];
 
+		if (desc.GenerateMipsInBackground && NeedsWork(data))
+		{
+			Validate(data);
+			slot.Source.clear();
+			slot.Error.clear();
+
+			{
+				std::lock_guard lock(mutex);
+				DropRequests(layer);
+				slot.Request = nextId++;
+				LoadRequest request{ layer, slot.Request, 0, nextOrder++, {} };
+				request.Data = std::make_shared<TextureLayerData>(std::move(data));
+				requests.push_back(std::move(request));
+				std::push_heap(requests.begin(), requests.end(),
+					[](const LoadRequest& a, const LoadRequest& b)
+					{
+						return a.Priority != b.Priority ? a.Priority < b.Priority : a.Order > b.Order;
+					});
+			}
+
+			slot.InFlight = true;
+			wake.notify_one();
+			return;
+		}
+
+		Normalize(data);
+		SetLayer(layer, std::make_shared<const TextureLayerData>(std::move(data)));
+	}
+
+	std::shared_ptr<const TextureLayerData> TextureArray::PrepareLayer(TextureLayerData data) const
+	{
+		Normalize(data);
+		return std::make_shared<const TextureLayerData>(std::move(data));
+	}
+
+	void TextureArray::SetLayer(std::uint32_t layer, std::shared_ptr<const TextureLayerData> prepared)
+	{
+		Check(layer);
+
+		if (!prepared || IsBc7(prepared->Format) != IsBc7(desc.Format) || prepared->Width != desc.Width ||
+			prepared->Height != desc.Height || prepared->Mips.size() != mipLevels)
+		{
+			throw std::invalid_argument(desc.DebugName + ": SetLayer data was not prepared by this array");
+		}
+
+		auto& slot = layers[layer];
+
+		if (slot.Request != 0 || slot.InFlight)
 		{
 			std::lock_guard lock(mutex);
 			DropRequests(layer);
@@ -431,7 +578,7 @@ namespace Swim::Render
 		slot.InFlight = false;
 		slot.Source.clear();
 		slot.Error.clear();
-		Queue(layer, std::make_shared<const TextureLayerData>(std::move(data)), false);
+		Queue(layer, std::move(prepared), false);
 	}
 
 	void TextureArray::LoadLayer(std::uint32_t layer, std::filesystem::path path, int priority)
@@ -457,6 +604,7 @@ namespace Swim::Render
 
 		if (slot.Pending && slot.NextMip == mipLevels)
 		{
+			slot.Whole = false;
 			slot.Pending.reset();
 			std::erase(uploads, layer);
 		}
@@ -657,6 +805,24 @@ namespace Swim::Render
 			LoadResult result;
 			result.Layer = request.Layer;
 			result.Id = request.Id;
+
+			if (request.Data)
+			{
+				try
+				{
+					Normalize(*request.Data);
+					result.Data = std::move(*request.Data);
+				}
+				catch (const std::exception& exception)
+				{
+					result.Error = exception.what();
+				}
+
+				std::lock_guard lock(mutex);
+				results.push_back(std::move(result));
+				continue;
+			}
+
 			std::error_code stampError;
 			result.Stamp = std::filesystem::last_write_time(request.Path, stampError);
 
@@ -831,23 +997,34 @@ namespace Swim::Render
 		{
 			const auto layer = uploads.front();
 			auto& slot = layers[layer];
-			const auto mip = slot.NextMip - 1;
-			const auto size = slot.Pending->Mips[mip].size();
+			const auto last = slot.Whole ? 0u : slot.NextMip - 1;
+			std::uint64_t need = 0;
 
-			if (!copies->empty() && staged + size > uploadBudget)
+			for (auto mip = slot.NextMip; mip-- > last;)
+			{
+				need = AlignUp(need + slot.Pending->Mips[mip].size(), 16);
+			}
+
+			if (!copies->empty() && staged + need > uploadBudget)
 			{
 				break;
 			}
 
-			copies->push_back({ slot.Pending, layer, mip, staged });
-			staged = AlignUp(staged + size, 16);
-			stats.UploadedBytes += size;
-			slot.MinLod = static_cast<float>(mip);
-			slot.NextMip = mip;
+			for (auto mip = slot.NextMip; mip-- > last;)
+			{
+				const auto size = slot.Pending->Mips[mip].size();
+				copies->push_back({ slot.Pending, layer, mip, staged });
+				staged = AlignUp(staged + size, 16);
+				stats.UploadedBytes += size;
+			}
 
-			if (mip == 0)
+			slot.MinLod = static_cast<float>(last);
+			slot.NextMip = last;
+
+			if (last == 0)
 			{
 				slot.HasImage = !slot.PendingPlaceholder;
+				slot.Whole = false;
 				slot.Pending.reset();
 				uploads.pop_front();
 			}
@@ -869,23 +1046,33 @@ namespace Swim::Render
 				uploadName, Rhi::QueueType::Transfer,
 				[&](RenderGraphBuilder& b)
 				{
+					// One use over the whole array: per-copy subresource uses cost O(n^2) to declare
+					// with thousands of copies in a pass. The transition keeps every layer's contents.
 					b.Read(staging, S::CopySource);
-
-					for (const auto& copy : *copies)
-					{
-						b.Write(imported, S::CopyDestination, { copy.Mip, 1, copy.Layer, 1 });
-					}
+					b.Write(imported, S::CopyDestination);
 				},
 				[imported, staging, copies, width = desc.Width, height = desc.Height](RenderCommandContext& c)
 				{
 					const auto source = c.GetRange(staging);
+					auto& target = c.Get(imported);
 
 					for (const auto& copy : *copies)
 					{
-						auto& target = c.Get(imported, { copy.Mip, 1, copy.Layer, 1 });
 						c.Commands().CopyBufferToTexture(*source.Buffer, target,
 							{ source.Offset + copy.StagingOffset, { copy.Mip, copy.Layer }, {}, { MipExtent(width, copy.Mip), MipExtent(height, copy.Mip), 1 } });
 					}
+				});
+			// Back to ShaderRead right after the copies, so draws that sample the array
+			// through GetView without declaring a graph read never see it as a copy target.
+			graph.AddPass(
+				desc.DebugName + " ready", Rhi::QueueType::Graphics,
+				[&](RenderGraphBuilder& b)
+				{
+					b.Read(imported, S::ShaderRead);
+					b.SideEffect();
+				},
+				[](RenderCommandContext&)
+				{
 				});
 		}
 

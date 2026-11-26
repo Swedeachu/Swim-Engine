@@ -27,6 +27,8 @@ struct VertexOutput
 	nointerpolation uint Textured : TEXCOORD2;
 	nointerpolation uint TextureIndex : TEXCOORD3;
 	nointerpolation uint SamplerIndex : TEXCOORD4;
+	nointerpolation uint Material : TEXCOORD5;	// ParticleMaterial.
+	nointerpolation float2 Random : TEXCOORD6; // x: per-particle random; y: normalized age.
 };
 
 // gl_VertexIndex / gl_InstanceIndex directly (SV_Vulkan*): every draw of this program
@@ -47,17 +49,58 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_
 	const float t = ParticleNormalizedAge(p);
 	const float size = p.Size * ParticleCurve(Emitters[emitterIndex].SizeTimes, Emitters[emitterIndex].SizeValues,
 		Emitters[emitterIndex].SizeKeyCount, t);
-	// Particles::BillboardCorner.
+	// Particles::ParticleBillboardAxes and BillboardCorner.
 	const float ox = (vertexId & 1u) != 0u ? 1.0 : -1.0;
 	const float oy = (vertexId & 2u) != 0u ? 1.0 : -1.0;
-	const float half = 0.5 * size;
+	const float halfWidth = 0.5 * size;
+	float halfHeight = halfWidth * lerp(Emitters[emitterIndex].AspectMin, Emitters[emitterIndex].AspectMax,
+		ParticleRandom(p.Id, Emitters[emitterIndex].Seed, 11u));
+	const float3 center = ParticleWorldPosition(transform, flags, p);
+	const float3 toCamera = Frame[0].CameraPosition - center;
+	float3 axisRight = Frame[0].CameraRight;
+	float3 axisUp = Frame[0].CameraUp;
+	const uint facing = Emitters[emitterIndex].Facing;
+	if (facing == ParticleFacingVelocity)
+	{
+		const float3 velocity = (flags & ParticleFlagLocalSpace) != 0u ? ParticleTransformVector(transform, p.Velocity) : p.Velocity;
+		const float speed = length(velocity);
+		const float3 side = speed > 1.0e-6 ? cross(velocity / speed, toCamera) : float3(0.0, 0.0, 0.0);
+		if (speed > 1.0e-6 && length(side) > 1.0e-6)
+		{
+			axisUp = velocity / speed;
+			axisRight = normalize(side);
+			halfHeight *= 1.0 + Emitters[emitterIndex].Stretch * speed;
+		}
+	}
+	else if (facing == ParticleFacingUprightY)
+	{
+		const float3 side = cross(float3(0.0, 1.0, 0.0), toCamera);
+		if (length(side) > 1.0e-6)
+		{
+			axisUp = float3(0.0, 1.0, 0.0);
+			axisRight = normalize(side);
+		}
+	}
+	else if (facing == ParticleFacingHorizontal)
+	{
+		axisRight = float3(1.0, 0.0, 0.0);
+		axisUp = float3(0.0, 0.0, -1.0);
+	}
+	else if (facing == ParticleFacingEmitter)
+	{
+		const float3 emitterRight = float3(transform[0].x, transform[1].x, transform[2].x);
+		const float3 emitterUp = float3(transform[0].y, transform[1].y, transform[2].y);
+		if (length(emitterRight) > 1.0e-6 && length(emitterUp) > 1.0e-6)
+		{
+			axisRight = normalize(emitterRight);
+			axisUp = normalize(emitterUp);
+		}
+	}
 	const float c = cos(p.Rotation);
 	const float s = sin(p.Rotation);
-	const float3 cameraRight = Frame[0].CameraRight;
-	const float3 cameraUp = Frame[0].CameraUp;
-	const float3 right = cameraRight * c + cameraUp * s;
-	const float3 up = cameraUp * c - cameraRight * s;
-	const float3 world = ParticleWorldPosition(transform, flags, p) + (right * ox + up * oy) * half;
+	const float3 right = axisRight * c + axisUp * s;
+	const float3 up = axisUp * c - axisRight * s;
+	const float3 world = center + right * (ox * halfWidth) + up * (oy * halfHeight);
 	float4 viewProjection[4];
 	for (uint r = 0; r < 4; ++r)
 	{
@@ -70,7 +113,9 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_
 	// Particles::FlipbookFrame.
 	const uint frames = Emitters[emitterIndex].FlipbookFrames;
 	const float frameRate = Emitters[emitterIndex].FlipbookFrameRate;
-	uint frame = frameRate > 0.0 ? uint(floor(p.Age * frameRate)) % frames : min(uint(floor(t * float(frames))), frames - 1u);
+	const uint played = uint(floor(p.Age * frameRate));
+	const uint looped = (flags & ParticleFlagFlipbookClamp) != 0u ? min(played, frames - 1u) : played % frames;
+	uint frame = frameRate > 0.0 ? looped : min(uint(floor(t * float(frames))), frames - 1u);
 	if ((Emitters[emitterIndex].Flags & ParticleFlagRandomFrame) != 0u)
 	{
 		frame = min(uint(ParticleRandom(p.Id, Emitters[emitterIndex].Seed, 10u) * float(frames)), frames - 1u);
@@ -99,7 +144,95 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_
 	output.Textured = (flags & ParticleFlagTextured) != 0u ? 1u : 0u;
 	output.TextureIndex = Emitters[emitterIndex].TextureIndex;
 	output.SamplerIndex = Emitters[emitterIndex].SamplerIndex;
+	output.Material = (flags >> ParticleFlagMaterialShift) & 15u;
+	output.Random = float2(ParticleRandom(p.Id, Emitters[emitterIndex].Seed, 12u), t);
 	return output;
+}
+
+static const uint MaterialSoft = 1u;
+static const uint MaterialFire = 2u;
+static const uint MaterialSmoke = 3u;
+static const uint MaterialSpark = 4u;
+static const uint MaterialGlow = 5u;
+static const uint MaterialRing = 6u;
+
+float ParticleValueNoise(float2 p)
+{
+	const float2 i = floor(p);
+	const float2 f = p - i;
+	const float2 s = f * f * (3.0 - 2.0 * f);
+	const uint2 c = uint2(int2(i) + 4096);
+	const float a = float(ParticleHash(c.x * 73856093u ^ c.y * 19349663u)) / 4294967295.0;
+	const float b = float(ParticleHash((c.x + 1u) * 73856093u ^ c.y * 19349663u)) / 4294967295.0;
+	const float d = float(ParticleHash(c.x * 73856093u ^ (c.y + 1u) * 19349663u)) / 4294967295.0;
+	const float e = float(ParticleHash((c.x + 1u) * 73856093u ^ (c.y + 1u) * 19349663u)) / 4294967295.0;
+	return lerp(lerp(a, b, s.x), lerp(d, e, s.x), s.y);
+}
+
+float ParticleFbm(float2 p)
+{
+	return ParticleValueNoise(p) * 0.55 + ParticleValueNoise(p * 2.03 + 17.1) * 0.3 + ParticleValueNoise(p * 4.1 + 41.7) * 0.15;
+}
+
+// Procedural VFX shapes (ParticleMaterial): straight rgb and alpha, before premultiplying.
+float4 ShadeMaterial(uint material, float4 color, float2 local, float2 random)
+{
+	const float2 d = local * 2.0 - 1.0;
+	const float r2 = dot(d, d);
+	const float seed = random.x * 97.0;
+	const float age = random.y;
+	if (material == MaterialSoft)
+	{
+		const float n = ParticleFbm(local * 3.0 + seed);
+		color.a *= exp(-r2 * 3.2) * saturate(1.0 - r2) * lerp(0.75, 1.15, n);
+		return color;
+	}
+	if (material == MaterialFire)
+	{
+		// A tongue: wide at the bottom, licking upward, eroded by rising noise as it ages.
+		const float n = ParticleFbm(float2(d.x * 2.2, local.y * 2.6 + age * 3.5) + seed);
+		const float width = lerp(0.95, 0.25, saturate(1.0 - local.y)) * (0.75 + 0.5 * n);
+		const float body = saturate(1.0 - abs(d.x) / max(width, 0.05)) * saturate(1.0 - r2 * 0.6);
+		const float mask = smoothstep(age * 0.85, age * 0.85 + 0.35, body * (0.6 + 0.6 * n));
+		const float core = pow(saturate(body * 1.4 - 0.3), 2.0);
+		color.rgb *= 1.0 + core * 2.5;
+		color.rgb = lerp(color.rgb, float3(1.0, 0.95, 0.85) * max(max(color.r, color.g), color.b), core * 0.45);
+		color.a *= mask;
+		return color;
+	}
+	if (material == MaterialSmoke)
+	{
+		const float n = ParticleFbm(local * 2.5 + seed + age * 0.6);
+		const float puff = saturate(1.0 - r2 * (1.0 + 0.8 * (1.0 - n)));
+		const float density = smoothstep(age * 0.7, age * 0.7 + 0.4, puff * (0.55 + 0.6 * n));
+		// Lit from above: the top of the billow is brighter, the underside in shade.
+		const float light = lerp(0.45, 1.15, saturate(0.5 - d.y * 0.6 + (n - 0.5) * 0.5));
+		color.rgb *= light;
+		color.a *= density;
+		return color;
+	}
+	if (material == MaterialSpark)
+	{
+		const float core = exp(-r2 * 18.0);
+		const float halo = exp(-r2 * 4.0);
+		color.rgb = color.rgb * (halo + core * 2.0) + core * 1.5 * max(max(color.r, color.g), color.b);
+		color.a *= saturate(halo + core);
+		return color;
+	}
+	if (material == MaterialGlow)
+	{
+		color.a *= exp(-r2 * 5.0) * saturate(1.0 - r2);
+		return color;
+	}
+	if (material == MaterialRing)
+	{
+		const float r = sqrt(r2);
+		const float width = lerp(0.18, 0.04, age);
+		const float n = ParticleFbm(float2(atan2(d.y, d.x) * 3.0, age * 4.0) + seed);
+		color.a *= exp(-pow((r - 0.85) / width, 2.0)) * lerp(0.6, 1.0, n) * step(r, 1.0);
+		return color;
+	}
+	return color;
 }
 
 // Particles::ShadeFragment: premultiplied (rgb * a, a).
@@ -111,7 +244,11 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 	{
 		color *= Textures[NonUniformResourceIndex(input.TextureIndex)].Sample(Samplers[NonUniformResourceIndex(input.SamplerIndex)], input.Uv);
 	}
-	else
+	if (input.Material != 0u)
+	{
+		color = ShadeMaterial(input.Material, color, input.Local, input.Random);
+	}
+	else if (input.Textured == 0u)
 	{
 		const float2 d = input.Local * 2.0 - 1.0;
 		color.a *= clamp(1.0 - dot(d, d), 0.0, 1.0);

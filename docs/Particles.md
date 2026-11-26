@@ -96,6 +96,8 @@ ParticleSystem::Draw(graph, frame, program, { Color, Depth }, bindless)
 | Cull | none | none |
 | Sorting | none (order independent) | per emitter, back to front by view depth, then id |
 
+`Material` (`ParticleMaterial`, packed in `Flags` bits 12–15) swaps that shape for a procedural VFX shape tinted by the gradient, whose rgb may be HDR: `Soft` (Gaussian puff), `Fire` (an eroding flame tongue, hottest at the core), `Smoke` (a billow lit from above, eroding as it fades), `Spark` (a white-hot core; use `Velocity` facing for streaks), `Glow` (a wide halo) and `Ring` (a thinning ring for shockwaves). `Sprite` (the default) is the plain look above. The CPU reference shades `Sprite` only.
+
 The render layout's space 1 is the bindless table's space (`ForwardPlusBindlessSpace` has the same schema), so one `BindlessResourceTable` serves Forward+ and particles.
 
 ### Transparency policy

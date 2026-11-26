@@ -28,6 +28,45 @@ namespace Swim::Render::Internal
 		const Rhi::RhiObject* Table = nullptr;
 	};
 
+	// A view of a pooled transient, kept while the pool holds the same objects and the view
+	// was used by the previous execution (RenderCommandContext::CreateView).
+	struct GraphViewKey
+	{
+		const Rhi::RhiObject* Texture = nullptr;
+		Rhi::TextureViewDimension Dimension{};
+		Rhi::Format PixelFormat{};
+		std::uint32_t BaseMipLevel = 0;
+		std::uint32_t MipLevelCount = 0;
+		std::uint32_t BaseArrayLayer = 0;
+		std::uint32_t ArrayLayerCount = 0;
+		Rhi::TextureAspect Aspect{};
+
+		bool operator==(const GraphViewKey&) const = default;
+	};
+
+	struct GraphViewKeyHash
+	{
+		std::size_t operator()(const GraphViewKey& key) const
+		{
+			std::uint64_t h = reinterpret_cast<std::uintptr_t>(key.Texture);
+			const std::uint32_t parts[] = { std::uint32_t(key.Dimension), std::uint32_t(key.PixelFormat), key.BaseMipLevel,
+				key.MipLevelCount, key.BaseArrayLayer, key.ArrayLayerCount, std::uint32_t(key.Aspect) };
+
+			for (const auto part : parts)
+			{
+				h = (h ^ part) * 0x100000001B3ull;
+			}
+
+			return static_cast<std::size_t>(h);
+		}
+	};
+
+	struct GraphCachedView
+	{
+		std::unique_ptr<Rhi::TextureView> View;
+		std::uint64_t Used = 0; // Execution that last used it.
+	};
+
 	struct GraphExecutionState
 	{
 		GraphExecutionState(Rhi::Device& device, const RenderGraphExecutorDesc& desc) : Device(device), Desc(desc) {}
@@ -53,6 +92,8 @@ namespace Swim::Render::Internal
 		std::vector<GraphIssuedTable> IssuedTables; // Created through the context in the current execution.
 		std::shared_ptr<const GraphShape> TablesShape;
 		std::uint64_t TablesLayoutGeneration = UINT64_MAX;
+		std::unordered_map<GraphViewKey, GraphCachedView, GraphViewKeyHash> Views; // Destroyed before Pool.
+		std::uint64_t Executions = 0;
 		std::uint64_t Submitted = 0;
 		bool Recording = false;
 		bool HasResult = false;

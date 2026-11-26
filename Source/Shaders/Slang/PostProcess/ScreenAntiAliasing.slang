@@ -72,7 +72,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float lumaMax = max(lumaC, max(max(lumaN, lumaS), max(lumaW, lumaE)));
 	const float range = lumaMax - lumaMin;
 
-	if (range < max(0.0312, lumaMax * Constants.Threshold))
+	// A high floor: texel detail inside block faces and glyph strokes is not an edge.
+	if (range < max(0.0833, lumaMax * Constants.Threshold))
 	{
 		Output[id.xy] = center;
 		return;
@@ -158,7 +159,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float average = (2.0 * (lumaNS + lumaWE) + (lumaNW + lumaNE + lumaSW + lumaSE)) / 12.0;
 	const float subpixel = saturate(abs(average - lumaC) / range);
 	const float subpixelBlend = (-2.0 * subpixel + 3.0) * subpixel * subpixel;
-	pixelOffset = max(pixelOffset, subpixelBlend * subpixelBlend * 0.75);
+	// Light subpixel smoothing (FXAA's 0.75 blurs fine texture and text).
+	pixelOffset = max(pixelOffset, subpixelBlend * subpixelBlend * 0.2);
 
 	float2 finalUv = uv;
 

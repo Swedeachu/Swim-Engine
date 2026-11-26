@@ -142,6 +142,27 @@ namespace Swim::Render
 		return RequestAsset(Kind::Mesh, mesh);
 	}
 
+	template <typename T> bool AssetResidencyService::MakeAssetUrgent(Kind kind, Assets::AssetHandle<T> handle)
+	{
+		if (!RequestAsset(kind, handle))
+		{
+			return false;
+		}
+
+		requests.at(handle.GetId()).Urgent = true;
+		return true;
+	}
+
+	bool AssetResidencyService::MakeUrgent(Assets::AssetHandle<Assets::MeshAsset> mesh)
+	{
+		return MakeAssetUrgent(Kind::Mesh, mesh);
+	}
+
+	bool AssetResidencyService::MakeUrgent(Assets::AssetHandle<Assets::TextureAsset> texture)
+	{
+		return MakeAssetUrgent(Kind::Texture, texture);
+	}
+
 	bool AssetResidencyService::RequestTexture(Assets::AssetHandle<Assets::TextureAsset> texture)
 	{
 		return RequestAsset(Kind::Texture, texture);
@@ -319,7 +340,7 @@ namespace Swim::Render
 		std::sort(queued.begin(), queued.end(),
 			[](const Request* a, const Request* b)
 			{
-				return a->Sequence < b->Sequence;
+				return a->Urgent != b->Urgent ? a->Urgent : a->Sequence < b->Sequence;
 			});
 
 		for (auto* request : queued)
@@ -379,7 +400,7 @@ namespace Swim::Render
 		std::sort(completed.begin(), completed.end(),
 			[](const Request* a, const Request* b)
 			{
-				return a->Sequence < b->Sequence;
+				return a->Urgent != b->Urgent ? a->Urgent : a->Sequence < b->Sequence;
 			});
 
 		for (auto* request : completed)
@@ -550,13 +571,15 @@ namespace Swim::Render
 		std::sort(waiting.begin(), waiting.end(),
 			[](const Request* a, const Request* b)
 			{
-				return a->Sequence < b->Sequence;
+				return a->Urgent != b->Urgent ? a->Urgent : a->Sequence < b->Sequence;
 			});
 		std::uint64_t staged = 0;
 
 		for (auto* request : waiting)
 		{
-			if (staged && staged >= desc.UploadBudgetBytes)
+			// Urgent requests (sorted first) ignore the budget, and one that does not fit yet
+			// does not hold back the others.
+			if (!request->Urgent && staged && staged >= desc.UploadBudgetBytes)
 			{
 				break;
 			}
@@ -567,7 +590,7 @@ namespace Swim::Render
 			{
 				staged += std::max<std::uint64_t>(bytes, 1);
 			}
-			else if (request->State == State::WaitingForGpuUpload)
+			else if (request->State == State::WaitingForGpuUpload && !request->Urgent)
 			{
 				break; // Capacity backpressure keeps FIFO order.
 			}

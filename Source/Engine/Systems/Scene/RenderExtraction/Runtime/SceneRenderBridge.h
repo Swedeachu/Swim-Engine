@@ -147,6 +147,7 @@ namespace Engine
 		std::uint64_t sceneId = 0;
 		std::unique_ptr<RenderExtractor> extractor;
 		RenderExtractionStats extraction;
+		std::uint64_t meshReplacements = 0; // MeshLibrary::GetMeshReplacements at the last refresh.
 		std::unordered_map<entt::entity, LightState> lights;
 		std::unordered_map<entt::entity, EmitterState> emitters;
 		std::unordered_map<entt::entity, SkinState> skins;

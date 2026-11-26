@@ -387,6 +387,19 @@ namespace Swim::Commands
 		const std::string name = tokens.front();
 		tokens.erase(tokens.begin());
 
+		if (const auto found = sessionOverrides.find(name); found != sessionOverrides.end() && !tokens.empty())
+		{
+			std::string value;
+
+			for (const auto& token : tokens)
+			{
+				value += (value.empty() ? "" : " ") + QuoteArgument(token);
+			}
+
+			found->second.Saved = std::move(value);
+			return;
+		}
+
 		try
 		{
 			if (!Dispatch(name, tokens) && !tokens.empty())
@@ -405,6 +418,39 @@ namespace Swim::Commands
 		{
 			std::cerr << "[Config] " << error.what() << '\n';
 		}
+	}
+
+	bool CommandRegistry::OverrideForSession(std::string_view name, std::string_view text)
+	{
+		ConsoleVariable* variable = FindVariable(name);
+
+		if (!variable)
+		{
+			return false;
+		}
+
+		SessionOverride entry;
+
+		if (!variable->IsDefault())
+		{
+			entry.Saved = QuoteArgument(variable->ToString());
+		}
+
+		sessionOverrides.erase(std::string(name));
+
+		if (!variable->SetFromText(text, true))
+		{
+			return false;
+		}
+
+		entry.Value = variable->ToString();
+		sessionOverrides.insert_or_assign(std::string(name), std::move(entry));
+		return true;
+	}
+
+	bool CommandRegistry::IsSessionOverride(std::string_view name) const
+	{
+		return sessionOverrides.contains(std::string(name));
 	}
 
 	bool CommandRegistry::ExecuteFile(const std::filesystem::path& path)
@@ -437,7 +483,19 @@ namespace Swim::Commands
 
 		for (const ConsoleVariable* variable : GetVariables())
 		{
-			if (HasFlag(variable->GetDesc().Flags, flags) && !variable->IsDefault())
+			if (!HasFlag(variable->GetDesc().Flags, flags))
+			{
+				continue;
+			}
+
+			if (const auto found = sessionOverrides.find(variable->GetName()); found != sessionOverrides.end())
+			{
+				if (found->second.Saved)
+				{
+					out += variable->GetName() + " " + *found->second.Saved + "\n";
+				}
+			}
+			else if (!variable->IsDefault())
 			{
 				out += variable->GetName() + " " + QuoteArgument(variable->ToString()) + "\n";
 			}
@@ -535,6 +593,12 @@ namespace Swim::Commands
 
 	void CommandRegistry::OnVariableChanged(const ConsoleVariable& variable)
 	{
+		if (const auto found = sessionOverrides.find(variable.GetName());
+			found != sessionOverrides.end() && variable.ToString() != found->second.Value)
+		{
+			sessionOverrides.erase(found);
+		}
+
 		if (HasFlag(variable.GetDesc().Flags, VariableFlags::Saved))
 		{
 			configDirty = true;

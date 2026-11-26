@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 using Engine::Camera;
@@ -448,4 +449,28 @@ SWIM_TEST("Engine.ProceduralMeshes", "TheAnnulusIsAFlatRingBetweenItsRadii")
 
 	SWIM_CHECK_NEAR(ring.BoundsMax()[0], 2.5f, 1e-3f);
 	SWIM_CHECK_NEAR(ring.BoundsMin()[2], -2.5f, 1e-3f);
+}
+
+SWIM_TEST("Engine.Camera", "NonFinitePoseInputIsIgnored")
+{
+	Camera camera;
+	camera.SetPosition({ 1.0f, 2.0f, 3.0f });
+	camera.SetYawPitch(0.5f, 0.1f);
+	const glm::quat rotation = camera.GetRotation();
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	camera.SetPosition({ nan, 0.0f, 0.0f });
+	camera.SetRotation(glm::quat(nan, 0.0f, 0.0f, 0.0f));
+	camera.SetRotation(glm::quat(0.0f, 0.0f, 0.0f, 0.0f));
+	SWIM_CHECK(camera.GetPosition() == glm::vec3(1.0f, 2.0f, 3.0f));
+	SWIM_CHECK(camera.GetRotation() == rotation);
+	const glm::mat4 view = camera.GetViewMatrix();
+
+	for (int i = 0; i < 16; ++i)
+	{
+		SWIM_CHECK(std::isfinite(view[i / 4][i % 4]));
+	}
+
+	// A scaled quaternion is normalised.
+	camera.SetRotation(glm::quat(2.0f, 0.0f, 0.0f, 0.0f));
+	SWIM_CHECK_NEAR(glm::length(camera.GetRotation()), 1.0f, 1e-5f);
 }

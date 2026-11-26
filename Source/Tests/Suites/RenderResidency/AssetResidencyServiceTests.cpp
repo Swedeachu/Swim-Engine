@@ -138,6 +138,44 @@ SWIM_TEST("Render.AssetResidency", "UploadBudgetAdmitsWaitingAssetsInRequestOrde
 	SWIM_CHECK(strict.GetState(big) == State::Uploading);
 }
 
+SWIM_TEST("Render.AssetResidency", "UrgentRequestsStageAheadOfTheQueueAndPastTheBudget")
+{
+	Testing::ResidencyServiceFixture fixture("Urgent");
+	AssetResidencyDesc desc;
+	desc.UploadBudgetBytes = 100; // Each mesh stages 60 bytes: one queued mesh per update.
+	auto& service = fixture.Service(std::move(desc));
+	std::vector<Assets::AssetHandle<Assets::MeshAsset>> backlog;
+
+	for (int i = 0; i < 6; ++i)
+	{
+		const std::string path = "Models/Backlog" + std::to_string(i) + ".mesh";
+		backlog.push_back(PublishCpu(fixture.assets, path.c_str(), MakeMesh(std::uint8_t(i), 4)));
+		service.RequestMesh(backlog.back());
+	}
+
+	// Requested last, but urgent: staged in the first update along with the queue's head,
+	// even though the two urgent ones alone use the budget.
+	const auto icon = PublishCpu(fixture.assets, "Models/Icon.mesh", MakeMesh(40, 4));
+	const auto iconTexture = PublishCpu(fixture.assets, "Textures/Icon.texture", MakeTexture());
+	const auto late = PublishCpu(fixture.assets, "Models/Late.mesh", MakeMesh(41, 4));
+	SWIM_CHECK(service.MakeUrgent(icon));
+	SWIM_CHECK(service.MakeUrgent(iconTexture));
+	SWIM_CHECK(service.RequestMesh(late));
+	SWIM_CHECK(service.MakeUrgent(late)); // An existing request becomes urgent too.
+
+	service.Update();
+	SWIM_CHECK(service.GetState(icon) == State::Uploading);
+	SWIM_CHECK(service.GetState(iconTexture) == State::Uploading);
+	SWIM_CHECK(service.GetState(late) == State::Uploading);
+	SWIM_CHECK(service.GetState(backlog[0]) == State::WaitingForGpuUpload); // The budget was spent.
+	fixture.UploadFrame();
+	SWIM_CHECK(service.GetState(icon) == State::Resident && service.GetState(iconTexture) == State::Resident);
+
+	// The queue carries on in order, two meshes per update.
+	SWIM_CHECK(service.GetState(backlog[0]) != State::WaitingForGpuUpload);
+	SWIM_CHECK(service.GetState(backlog[5]) == State::WaitingForGpuUpload);
+}
+
 SWIM_TEST("Render.AssetResidency", "ReportsMissingUnreadableAndInvalidObjects")
 {
 	Testing::ResidencyServiceFixture fixture("Failures", false);

@@ -32,8 +32,8 @@ namespace Engine
 	// Present mode, frame cap and low-latency pacing as saved console variables:
 	//   video_present_mode auto|vsync|mailbox|immediate  auto follows --vsync
 	//   video_fps_max <n>       0 = uncapped; else sleep (then spin) to n frames per second
-	//   video_low_latency 0|1   before input is sampled, wait for the GPU to finish the frames
-	//                           already submitted, so the render queue is at most one frame deep
+	//   video_low_latency 0|1   before input is sampled, wait until at most one submitted frame
+	//                           is unfinished, so the GPU draws it while this frame is built
 	//   video_pacing_stats      prints the pacing statistics
 	// BeginFrame runs before input is pumped (the waits come first, then input is sampled);
 	// EndFrame after the frame is submitted.

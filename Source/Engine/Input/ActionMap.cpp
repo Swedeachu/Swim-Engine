@@ -369,7 +369,15 @@ namespace Swim::Input
 			return {};
 		}
 
-		return { mouseDelta.X * mouseSensitivity, mouseDelta.Y * mouseSensitivity * (invertMouseY ? -1.0f : 1.0f) };
+		const float invert = invertMouseY ? -1.0f : 1.0f;
+
+		if (lookCurve)
+		{
+			const Platform::Float2 look = lookCurve(mouseDelta, lookSetting);
+			return { look.X, look.Y * invert };
+		}
+
+		return { mouseDelta.X * mouseSensitivity, mouseDelta.Y * mouseSensitivity * invert };
 	}
 
 	void ActionMap::ExecuteBind(const std::vector<std::string>& arguments)

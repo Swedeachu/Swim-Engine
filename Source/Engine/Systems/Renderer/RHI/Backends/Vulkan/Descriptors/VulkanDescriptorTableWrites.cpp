@@ -39,11 +39,15 @@ namespace Swim::RhiVulkan
 		}
 
 		const auto& limits = GetState()->Device.physical_device.properties.limits;
-		std::vector<VkWriteDescriptorSet> native(writes.size());
-		std::vector<VkDescriptorImageInfo> images(writes.size());
-		std::vector<VkDescriptorBufferInfo> buffers(writes.size());
-		std::vector<std::size_t> bindingIndices;
-		bindingIndices.reserve(writes.size());
+		// Reused per thread: tables are written for every draw of every frame.
+		thread_local std::vector<VkWriteDescriptorSet> native;
+		thread_local std::vector<VkDescriptorImageInfo> images;
+		thread_local std::vector<VkDescriptorBufferInfo> buffers;
+		thread_local std::vector<std::size_t> bindingIndices;
+		native.assign(writes.size(), {});
+		images.assign(writes.size(), {});
+		buffers.assign(writes.size(), {});
+		bindingIndices.clear();
 
 		for (std::size_t index = 0; index < writes.size(); ++index)
 		{

@@ -160,6 +160,9 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const ForwardView view = Views[0];
 	const ClusterGrid grid = Grid[0];
 	const StandardMaterialParameters material = Materials[input.Material];
+	// Derivatives before any discard (uniform control flow): the glint's texture layers.
+	const float2 uvDx = ddx(input.Uv);
+	const float2 uvDy = ddy(input.Uv);
 	// ForwardPlus::BuildFrame: the rasterizer's facing, corrected for mirroring transforms.
 	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
 	// Also after the depth prepass: the prepass wrote no depth where it rejected a culled
@@ -184,11 +187,16 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const float3 tangent = normalize(input.Tangent.xyz - normal * dot(normal, input.Tangent.xyz) + float3(1.0e-20, 0.0, 0.0));
 	const float3 bitangent = cross(normal, tangent) * (input.Tangent.w < 0.0 ? -1.0 : 1.0);
 	StandardPbrSurface surface = StandardPbrResolve(material, texels, normal, tangent, bitangent, frontFacing);
-	// Before the alpha discard: the derivatives need the whole quad.
-	surface.PerceptualRoughness = StandardPbrSpecularAntiAlias(surface.PerceptualRoughness, ddx(surface.Normal), ddy(surface.Normal));
 	if (surface.Discard)
 	{
 		discard;
+	}
+	if (material.GlintIntensity > 0.0 && view.Glint.Source.x != GlintModeOff)
+	{
+		const float3 toCamera = normalize(view.CameraPosition - input.WorldPosition);
+		const float3 glint = GlintEvaluate(view.Glint, Textures[NonUniformResourceIndex(view.Glint.Source.y)],
+			Samplers[NonUniformResourceIndex(view.Glint.Source.z)], input.Uv, uvDx, uvDy, surface.Normal, toCamera);
+		surface.Emissive += glint * material.GlintIntensity;
 	}
 
 	const ForwardLighting lit = ForwardLightSurface(view, grid, surface, input.WorldPosition, input.Position.xy);

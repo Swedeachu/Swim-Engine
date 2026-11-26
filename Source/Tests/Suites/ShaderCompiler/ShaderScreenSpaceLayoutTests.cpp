@@ -72,9 +72,13 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("AoRadius"), std::uint32_t(offsetof(P, AoRadius)));
 		SWIM_CHECK_EQUAL(offsets.at("AoSliceCount"), std::uint32_t(offsetof(P, AoSliceCount)));
 		SWIM_CHECK_EQUAL(offsets.at("FogEnabled"), std::uint32_t(offsetof(P, FogEnabled)));
-		SWIM_CHECK_EQUAL(offsets.at("FogColor"), std::uint32_t(offsetof(P, FogColor)));
-		SWIM_CHECK_EQUAL(offsets.at("FogDensity"), std::uint32_t(offsetof(P, FogDensity)));
-		SWIM_CHECK_EQUAL(offsets.at("FogSunDirection"), std::uint32_t(offsetof(P, FogSunDirection)));
+		// The shader reads colour and density (and the sun pairs) as float4s.
+		SWIM_CHECK_EQUAL(offsets.at("FogColorDensity"), std::uint32_t(offsetof(P, FogColor)));
+		SWIM_CHECK_EQUAL(offsets.at("FogColorDensity") + 12u, std::uint32_t(offsetof(P, FogDensity)));
+		SWIM_CHECK_EQUAL(offsets.at("FogSunColorFalloff") + 12u, std::uint32_t(offsetof(P, FogHeightFalloff)));
+		SWIM_CHECK_EQUAL(offsets.at("FogSunDirectionBase"), std::uint32_t(offsetof(P, FogSunDirection)));
+		SWIM_CHECK_EQUAL(offsets.at("FogSunDirectionBase") + 12u, std::uint32_t(offsetof(P, FogBaseHeight)));
+		SWIM_CHECK_EQUAL(offsets.at("FogCurve"), std::uint32_t(offsetof(P, FogCurve)));
 		SWIM_CHECK_EQUAL(offsets.at("FogMaxDistance"), std::uint32_t(offsetof(P, FogMaxDistance)));
 		SWIM_CHECK_EQUAL(offsets.at("SsrEnabled"), std::uint32_t(offsetof(P, SsrEnabled)));
 		SWIM_CHECK_EQUAL(offsets.at("Projection"), std::uint32_t(offsetof(P, Projection)));

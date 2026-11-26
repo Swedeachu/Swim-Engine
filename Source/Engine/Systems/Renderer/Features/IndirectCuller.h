@@ -93,6 +93,9 @@ namespace Engine
 
 		std::string name;
 		std::unique_ptr<Swim::Rhi::Buffer> history; // Per item: visible last frame.
+		// Replaced history buffers, kept until frames that may still use them have finished
+		// (frames left before release).
+		std::vector<std::pair<std::unique_ptr<Swim::Rhi::Buffer>, std::uint32_t>> retired;
 		Swim::Render::GraphBuffer visibility{};
 		Swim::Render::GraphBuffer bounds{};
 		Swim::Render::GraphBuffer commands{};

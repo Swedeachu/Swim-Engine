@@ -46,8 +46,7 @@ namespace Engine
 			Category, VariableFlags::Saved);
 		fpsMax = &commands.AddInt("video_fps_max", 0, 0, 1000, "Frame rate cap (0 = uncapped)", Category, VariableFlags::Saved);
 		lowLatency = &commands.AddBool("video_low_latency", false,
-			"Wait for the GPU before sampling input, keeping at most one frame queued (lower latency, lower throughput)", Category,
-			VariableFlags::Saved);
+			"Wait for the GPU before sampling input, keeping at most one frame queued (lower latency)", Category, VariableFlags::Saved);
 		presentMode->Subscribe(
 			[this](const Swim::Commands::ConsoleVariable&)
 			{
@@ -118,7 +117,10 @@ namespace Engine
 		if (lowLatency->GetBool() && device)
 		{
 			const auto before = Clock::now();
-			device->WaitForQueuedFrames(100'000'000);
+			// At most one frame stays queued: the GPU draws the previous frame while this one is
+			// built, so a frame costs max(CPU, GPU) instead of CPU + GPU, for at most one frame
+			// of GPU time more latency than an empty queue (and still far less than vsync's).
+			device->WaitForQueuedFrames(100'000'000, 1);
 			stats.GpuWaitMilliseconds = Milliseconds(Clock::now() - before);
 		}
 

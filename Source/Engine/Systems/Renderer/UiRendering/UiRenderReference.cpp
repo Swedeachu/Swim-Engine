@@ -122,11 +122,34 @@ namespace Swim::Render::Ui
 				quad.Kind = UiQuadImage;
 				quad.Texture = source.Texture;
 				quad.Sampler = source.Sampler;
+
+				if (source.Glint > 0.0f && desc.Glint && desc.Glint->Mode != 0)
+				{
+					quad.Kind = UiQuadImageGlint;
+					quad.BorderColor[0] = desc.Glint->Color[0];
+					quad.BorderColor[1] = desc.Glint->Color[1];
+					quad.BorderColor[2] = desc.Glint->Color[2];
+					quad.BorderColor[3] = desc.Glint->Color[3] * source.Glint;
+					quad.PixelRange = float(desc.Glint->Mode);
+					quad.UnitRange = float(desc.Glint->Texture);
+				}
+
 				quad.Blend = source.Blend == UI::UiBlend::Invert ? UiQuadBlendInvert : UiQuadBlendNormal;
 				++local.Images;
 				break;
 			default:
 				quad.Kind = UiQuadSolid;
+
+				if (source.Gradient != UI::UiGradient::None)
+				{
+					quad.Kind = UiQuadGradient;
+					quad.Uv[0] = source.ColorEnd.R;
+					quad.Uv[1] = source.ColorEnd.G;
+					quad.Uv[2] = source.ColorEnd.B;
+					quad.Uv[3] = source.ColorEnd.A;
+					quad.PixelRange = source.Gradient == UI::UiGradient::Vertical ? 1.0f : 0.0f;
+				}
+
 				quad.Radius = source.CornerRadius * s;
 				quad.Border = source.BorderWidth * s;
 				quad.BorderColor[0] = source.BorderColor.R;
@@ -137,7 +160,7 @@ namespace Swim::Render::Ui
 				break;
 			}
 
-			if (source.Shear != 0.0f && quad.Kind != UiQuadSolid)
+			if (source.Shear != 0.0f && quad.Kind != UiQuadSolid && quad.Kind != UiQuadGradient)
 			{
 				quad.Radius = source.Shear;
 				quad.Border = source.ShearPivotY * s + desc.OffsetY;
@@ -266,7 +289,7 @@ namespace Swim::Render::Ui
 		const float y0 = std::max(q.Rect[1], q.Clip[1]);
 		const float y1 = std::min(q.Rect[3], q.Clip[3]);
 
-		if (q.Kind != UiQuadSolid && q.Radius != 0.0f)
+		if (q.Kind != UiQuadSolid && q.Kind != UiQuadGradient && q.Radius != 0.0f)
 		{
 			// Sheared: clipped horizontally here, then shaded at the unsheared point.
 			if (!(px >= q.Clip[0] && px < q.Clip[2]))
@@ -292,9 +315,19 @@ namespace Swim::Render::Ui
 			}
 		}
 
-		const Float4 color{ q.Color[0], q.Color[1], q.Color[2], q.Color[3] };
+		Float4 color{ q.Color[0], q.Color[1], q.Color[2], q.Color[3] };
 		const float width = std::max(q.Rect[2] - q.Rect[0], 1e-6f);
 		const float height = std::max(q.Rect[3] - q.Rect[1], 1e-6f);
+
+		if (q.Kind == UiQuadGradient)
+		{
+			const float t = Saturate(q.PixelRange > 0.5f ? (py - q.Rect[1]) / height : (px - q.Rect[0]) / width);
+
+			for (int c = 0; c < 4; ++c)
+			{
+				color[c] += (q.Uv[c] - color[c]) * t;
+			}
+		}
 		const float u = q.Uv[0] + (px - q.Rect[0]) / width * (q.Uv[2] - q.Uv[0]);
 		const float v = q.Uv[1] + (py - q.Rect[1]) / height * (q.Uv[3] - q.Uv[1]);
 
@@ -316,7 +349,7 @@ namespace Swim::Render::Ui
 				a * color[3] };
 		}
 
-		if (q.Kind == UiQuadImage)
+		if (q.Kind == UiQuadImage || q.Kind == UiQuadImageGlint)
 		{
 			const auto texel = sample(q.Texture, q.Sampler, u, v);
 			return { texel[0] * color[0], texel[1] * color[1], texel[2] * color[2], texel[3] * color[3] };
@@ -423,7 +456,7 @@ namespace Swim::Render::Ui
 			float x1 = std::min(quad.Rect[2], quad.Clip[2]);
 			const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
 
-			if (quad.Kind != UiQuadSolid && quad.Radius != 0.0f)
+			if (quad.Kind != UiQuadSolid && quad.Kind != UiQuadGradient && quad.Radius != 0.0f)
 			{
 				const float a = quad.Radius * (quad.Border - y0);
 				const float b = quad.Radius * (quad.Border - y1);

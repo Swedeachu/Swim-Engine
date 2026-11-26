@@ -440,6 +440,10 @@ namespace Engine
 			extent = { pixels.Width, pixels.Height };
 		}
 
+		// The present semaphores are replaced below while the present queue may still wait on
+		// them (presentation has no completion signal).
+		WaitIdle();
+
 		// Imported swapchain views retire with the executors' pooled resources.
 		for (auto& executor : executors)
 		{
@@ -486,21 +490,23 @@ namespace Engine
 		return static_cast<std::uint32_t>(queued.size());
 	}
 
-	bool RenderDevice::WaitForQueuedFrames(std::uint64_t timeoutNanoseconds)
+	bool RenderDevice::WaitForQueuedFrames(std::uint64_t timeoutNanoseconds, std::uint32_t keep)
 	{
-		if (GetQueuedFrames() == 0)
+		const auto count = GetQueuedFrames();
+
+		if (count <= keep)
 		{
 			return true;
 		}
 
-		const auto last = queued.back();
+		const auto target = queued[count - 1 - keep];
 
-		if (!last.Semaphore->Wait(last.Value, timeoutNanoseconds))
+		if (!target.Semaphore->Wait(target.Value, timeoutNanoseconds))
 		{
 			return false;
 		}
 
-		queued.clear();
+		queued.erase(queued.begin(), queued.begin() + (count - keep));
 		return true;
 	}
 
@@ -644,8 +650,9 @@ namespace Engine
 
 		if (device)
 		{
-			// Presentation waits are not covered by the render completion timeline.
-			device->GetQueue(Swim::Rhi::QueueType::Graphics).WaitIdle();
+			// Presentation waits are not covered by the render completion timeline, and may sit
+			// on a separate present queue: wait for the whole device.
+			device->WaitIdle();
 		}
 	}
 

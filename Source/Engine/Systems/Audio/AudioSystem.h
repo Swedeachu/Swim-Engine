@@ -149,6 +149,16 @@ namespace Engine
 		std::function<void(VoiceHandle)> OnFinished;
 	};
 
+	// A sound that started (AudioSystem::SetPlayObserver), for scene recorders.
+	struct AudioPlayRecord
+	{
+		std::string_view Key; // As given to LoadSound / Play.
+		std::optional<glm::vec3> Position;
+		float Volume = 1.0f;
+		float Pitch = 1.0f;
+		bool Loop = false;
+	};
+
 	struct AudioListener
 	{
 		glm::vec3 Position{ 0.0f };
@@ -226,6 +236,9 @@ namespace Engine
 		VoiceHandle Play(SoundHandle sound, const PlayParams& params = {});
 
 		VoiceHandle Play(std::string_view path, const PlayParams& params = {});
+
+		// Called on the main thread for every voice that starts (groups and events included).
+		void SetPlayObserver(std::function<void(const AudioPlayRecord&)> observer);
 
 		void Stop(VoiceHandle voice, float fadeSeconds = 0.0f);
 

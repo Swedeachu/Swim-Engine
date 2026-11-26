@@ -34,8 +34,9 @@ namespace Engine
 
 		struct SurfaceParams
 		{
-			Float4 Grid, GridShape, InverseSizes, Weights, DeepColor, ScatterColor, FoamColor, SunDirection, SunColor, FogColor, Ambient;
+			Float4 Grid, GridShape, InverseSizes, Weights, DeepColor, ScatterColor, FoamColor, SunDirection, SunColor, Ambient;
 			Float4 LodFade0, LodFade1, LodFade2, Far;
+			GpuDistanceFog Fog;
 		};
 
 		float InverseRange(float start, float end)
@@ -509,7 +510,16 @@ namespace Engine
 		p.FoamColor = Vec(Settings.FoamColor, Settings.Foam);
 		p.SunDirection = Vec(view.SunDirection, Settings.AmbientScatter);
 		p.SunColor = Vec(view.SunColor, Settings.CrestScatterHeight);
-		p.FogColor = Vec(Settings.FogColor, std::max(Settings.FogDensity, 0.0f));
+		DistanceFogSettings fog;
+		fog.Enabled = Settings.FogShape != FogCurve::Exponential || Settings.FogDensity > 0.0f;
+		fog.Curve = Settings.FogShape;
+		fog.Color = Settings.FogColor;
+		fog.StartDistance = Settings.FogStart;
+		fog.EndDistance = Settings.FogEnd;
+		fog.Density = Settings.FogDensity;
+		fog.Exponent = Settings.FogExponent;
+		fog.MaxOpacity = Settings.FogMaxOpacity;
+		p.Fog = PackDistanceFog(fog);
 		p.Ambient = Vec(Settings.AmbientColor, maps.HasPrevious ? 1.0f : 0.0f);
 		const auto& lod = Settings.Lod;
 		ValidateWaterLodSettings(lod);

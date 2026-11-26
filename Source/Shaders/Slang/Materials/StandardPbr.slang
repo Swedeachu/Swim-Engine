@@ -36,8 +36,10 @@ float3 StandardPbrFresnelSchlick(float3 f0, float vDotH)
 	return f0 + (1.0 - f0) * f;
 }
 
-// BRDF times N.L for unit vectors pointing away from the surface.
-float3 StandardPbrEvaluateBrdf(float3 baseColor, float metallicInput, float perceptualRoughness, float3 normal, float3 view, float3 light)
+// BRDF times N.L for unit vectors pointing away from the surface. grazing scales Fresnel's rise
+// toward 1 at grazing angles (0 for thin cards: they keep F0).
+float3 StandardPbrEvaluateBrdf(float3 baseColor, float metallicInput, float perceptualRoughness, float3 normal, float3 view, float3 light,
+	float grazing = 1.0)
 {
 	const float nDotL = dot(normal, light);
 	if (nDotL <= 0.0)
@@ -53,7 +55,7 @@ float3 StandardPbrEvaluateBrdf(float3 baseColor, float metallicInput, float perc
 	const float metallic = clamp(metallicInput, 0.0, 1.0);
 	const float3 f0 = StandardPbrDielectricF0 + (baseColor - StandardPbrDielectricF0) * metallic;
 	const float3 diffuseColor = baseColor * (1.0 - metallic);
-	const float3 fresnel = StandardPbrFresnelSchlick(f0, vDotH);
+	const float3 fresnel = f0 + (1.0 - f0) * (pow(1.0 - vDotH, 5.0) * grazing);
 	const float dv = StandardPbrDistributionGgx(nDotH, alpha) * StandardPbrVisibilitySmithGgxCorrelated(nDotV, nDotL, alpha);
 	const float3 diffuse = (1.0 - fresnel) * diffuseColor / StandardPbrPi;
 	return (diffuse + dv * fresnel) * nDotL;
@@ -106,8 +108,9 @@ bool StandardPbrIsThin(StandardMaterialParameters parameters)
 }
 
 // Alpha-tested two-sided cards (leaves, stems, grass) turn edge-on and away from the viewer,
-// where GGX and Fresnel run to white flecks. Their roughness is floored when resolved and
-// their normal bent to face the viewer a little when lit, so the specular stays dim and stable.
+// where GGX and Fresnel run to white flecks. Their roughness is floored when resolved, their
+// normal bent to face the viewer a little when lit, and their Fresnel held at F0 (no grazing
+// rise), so the specular stays dim and stable. Surfaces built by hand set Thin themselves.
 static const float StandardPbrThinMinPerceptualRoughness = 0.6;
 static const float StandardPbrThinMinFacing = 0.2;
 
@@ -178,7 +181,8 @@ float3 StandardPbrEvaluateEnvironment(StandardPbrSurface surface, float3 view, S
 	const float roughness = clamp(surface.PerceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
 	const float metallic = clamp(surface.Metallic, 0.0, 1.0);
 	const float nDotV = clamp(dot(surface.Normal, view), 1.0e-4, 1.0);
-	const float fresnel = pow(1.0 - nDotV, 5.0);
+	// Thin cards keep F0: edge-on leaves and stems would otherwise mirror the sky in white flecks.
+	const float fresnel = surface.Thin ? 0.0 : pow(1.0 - nDotV, 5.0);
 	const float3 f0 = StandardPbrDielectricF0 + (surface.BaseColor - StandardPbrDielectricF0) * metallic;
 	const float3 diffuseColor = surface.BaseColor * (1.0 - metallic);
 	const float3 fr = max(float3(1.0 - roughness), f0) - f0;
@@ -195,7 +199,8 @@ float3 StandardPbrEnvironmentSpecularWeight(StandardPbrSurface surface, float3 v
 	const float roughness = clamp(surface.PerceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
 	const float metallic = clamp(surface.Metallic, 0.0, 1.0);
 	const float nDotV = clamp(dot(surface.Normal, view), 1.0e-4, 1.0);
-	const float fresnel = pow(1.0 - nDotV, 5.0);
+	// Thin cards keep F0: edge-on leaves and stems would otherwise mirror the sky in white flecks.
+	const float fresnel = surface.Thin ? 0.0 : pow(1.0 - nDotV, 5.0);
 	const float3 f0 = StandardPbrDielectricF0 + (surface.BaseColor - StandardPbrDielectricF0) * metallic;
 	const float3 fr = max(float3(1.0 - roughness), f0) - f0;
 	const float3 ks = f0 + fr * fresnel;

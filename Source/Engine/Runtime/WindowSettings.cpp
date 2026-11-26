@@ -1,5 +1,6 @@
 #include "Engine/Runtime/WindowSettings.h"
 
+#include <algorithm>
 #include <charconv>
 #include <iostream>
 
@@ -22,7 +23,7 @@ namespace Engine
 	{
 		mode = &commands.AddEnum("window_mode", { "windowed", "borderless", "exclusive" }, static_cast<uint32_t>(initial.Mode),
 			"Windowed, borderless fullscreen or exclusive fullscreen", Category, VariableFlags::Saved);
-		display = &commands.AddInt("window_display", 0, 0, 16, "Display to use: 0 = primary, n = the nth entry of display_list", Category,
+		display = &commands.AddInt("window_display", std::min<int64_t>(initial.DisplayIndex, 16), 0, 16, "Display to use: 0 = primary, n = the nth entry of display_list", Category,
 			VariableFlags::Saved);
 		std::string initialResolution;
 

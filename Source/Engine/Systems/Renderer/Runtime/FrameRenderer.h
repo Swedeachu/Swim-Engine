@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Assets/AssetHandle.h"
+#include "Engine/Assets/TextureAsset.h"
 #include "Engine/Systems/Renderer/Runtime/RenderFeature.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
@@ -202,6 +204,15 @@ namespace Engine
 		Swim::Render::SkinningSystem& GetSkinning() const;
 
 		Swim::Render::BindlessResourceTable& GetBindless() const;
+
+		// The glint texture RenderSettings::Glint scrolls in Texture mode (nullptr: none; Texture
+		// mode then falls back to Procedural). The view must stay alive until it is replaced
+		// and the frames using it have completed (GetLastCompletion at that point).
+		void SetGlintTexture(Swim::Rhi::TextureView* view);
+		// The same from a texture asset (e.g. MeshLibrary::RegisterTexture): requested urgently
+		// and used once resident (Procedural until then). The asset's owner keeps it alive; an
+		// invalid handle clears it.
+		void SetGlintTexture(Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> texture);
 
 		Swim::Render::AssetResidencyService& GetResidency() const;
 

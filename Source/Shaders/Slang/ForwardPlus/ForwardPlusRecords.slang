@@ -3,6 +3,7 @@
 // line for line; ShaderCompiler.ForwardPlusLayout compares the reflected layouts.
 #ifndef SWIM_FORWARD_PLUS_RECORDS_SLANG
 #define SWIM_FORWARD_PLUS_RECORDS_SLANG
+#include "Features/Glint.slang"
 #include "Materials/StandardMaterialParameters.slang"
 
 static const uint ForwardViewFlagEnvironment = 1u << 0;
@@ -19,7 +20,7 @@ struct ForwardView
 	float3 CameraForward;
 	float EnvironmentRotation;
 	float3 Ambient;
-	float Reserved0;
+	float MinimumLight; // Full-bright floor (RenderSettings::MinimumLight).
 	uint MaterialCount;
 	uint PrefilteredMipCount;
 	uint Flags;
@@ -28,6 +29,7 @@ struct ForwardView
 	// xy: the jitter, an NDC offset added to clip.xy / clip.w. zw: RenderObjectFlags::Overlay
 	// objects' clip.xy scale (tan(camera fov / 2) / tan(overlay fov / 2)) and near plane.
 	float4 JitterOverlay;
+	GlintParams Glint; // Materials with GlintIntensity > 0 (RenderSettings::Glint).
 };
 
 struct ForwardSortEntry

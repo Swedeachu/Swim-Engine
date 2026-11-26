@@ -26,6 +26,7 @@ namespace Swim::Render::Ui
 		std::span<const std::uint32_t> AtlasTextures; // Bindless texture index per atlas page.
 		std::uint32_t AtlasSampler = 0;				  // Bindless sampler index for atlas pages.
 		std::uint32_t AtlasPointSampler = 0;		  // Nearest sampler for colour (bitmap-font) pages.
+		const UiGlint* Glint = nullptr;				  // Images with a glint become UiQuadImageGlint (null or Mode 0: plain).
 	};
 
 	struct QuadBuildStats

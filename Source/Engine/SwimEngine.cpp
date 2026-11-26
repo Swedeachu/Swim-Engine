@@ -14,6 +14,9 @@
 #include "Engine/Runtime/ShaderTweaks.h"
 #include "Engine/Runtime/WindowSettings.h"
 #include "Engine/Systems/Camera/CameraSystem.h"
+#include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
+#include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
+#include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
 #include "Engine/Systems/Renderer/Runtime/FrameRenderer.h"
 #include "Engine/Systems/Renderer/Runtime/MaterialLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/MeshLibrary.h"
@@ -523,6 +526,18 @@ namespace Engine
 			renderQuality->SetSettings(renderServices.Settings);
 		}
 
+		// Window flags win over the saved settings for this run and are not written back.
+		if (config.DisplayGiven)
+		{
+			commandRegistry->OverrideForSession("window_display", std::to_string(config.Window.DisplayIndex));
+		}
+
+		if (config.WindowModeGiven)
+		{
+			const char* modes[] = { "windowed", "borderless", "exclusive" };
+			commandRegistry->OverrideForSession("window_mode", modes[static_cast<std::uint32_t>(config.Window.Mode) % 3]);
+		}
+
 		if (const auto path = GetUserConfigPath(); !path.empty() && commandRegistry->ExecuteFile(path))
 		{
 			std::cout << "[Config] Loaded " << path.string() << '\n';
@@ -692,6 +707,33 @@ namespace Engine
 						renderServices.Settings->StreamingUploadBudget = std::uint64_t(variable.GetInt()) << 20;
 					}
 				});
+		commands.Register({ "resource_stats", "Prints live GPU resources: bindless slots, textures, meshes, materials, pending releases",
+							  "Video/Rendering", "" },
+			[this](const std::vector<std::string>&)
+			{
+				if (!renderServices.Renderer)
+				{
+					std::cout << "No renderer.\n";
+					return;
+				}
+
+				const auto& renderer = *renderServices.Renderer;
+				const auto bindless = renderer.GetBindless().GetStats();
+				const auto residency = renderer.GetResidency().GetStats();
+				const auto geometry = renderer.GetGeometry().GetStats();
+				const auto meshes = renderer.GetMeshes().GetStats();
+				std::cout << "bindless textures " << bindless.LiveTextures << "/" << bindless.TextureCapacity << " (retiring "
+						  << bindless.RetiringTextures << "), samplers " << bindless.LiveSamplers << "/" << bindless.SamplerCapacity << "\n"
+						  << "residency: resident " << residency.Resident << ", bindless " << residency.BindlessTextures
+						  << ", waiting for a slot " << residency.BindlessPending << ", queued " << residency.Queued << ", failed "
+						  << residency.Failed << "\n"
+						  << "geometry: resident " << geometry.ResidentMeshes << ", retiring " << geometry.RetiringMeshes << ", pending "
+						  << geometry.PendingMeshes << "\n"
+						  << "mesh library: meshes " << meshes.Meshes << " (resident " << meshes.ResidentMeshes << "), textures "
+						  << meshes.Textures << " (resident " << meshes.ResidentTextures << "), pending releases " << meshes.PendingReleases
+						  << ", replaced names " << meshes.Replacements << "\n"
+						  << "materials " << renderer.GetMaterials().GetCount() << "\n";
+			});
 		commands.Register("play",
 			[this](const std::vector<std::string>&)
 			{
@@ -1243,11 +1285,13 @@ namespace Engine
 			"Controls/Mouse", VariableFlags::Saved);
 		auto& invert = commands.AddBool("mouse_invert_y", false, "Inverts vertical mouse look", "Controls/Mouse", VariableFlags::Saved);
 		actions.SetMouseSensitivity(LookSensitivityScale(sensitivity.GetFloat()));
+		actions.SetLookSetting(sensitivity.GetFloat());
 		actions.SetInvertMouseY(invert.GetBool());
 		sensitivity.Subscribe(
 			[this](const Swim::Commands::ConsoleVariable& variable)
 			{
 				actionMap->SetMouseSensitivity(LookSensitivityScale(variable.GetFloat()));
+				actionMap->SetLookSetting(variable.GetFloat());
 			});
 		invert.Subscribe(
 			[this](const Swim::Commands::ConsoleVariable& variable)
@@ -1911,11 +1955,26 @@ namespace Engine
 
 				pendingCapture.clear();
 			}
+
+			failedFrames = 0;
 		}
 		catch (const std::exception& error)
 		{
-			std::cerr << "[Render] Frame failed: " << error.what() << '\n';
-			running = false;
+			// One bad frame (a broken camera, a bad edit) is skipped; only a renderer that keeps
+			// failing stops the engine. Each new message is logged once.
+			++failedFrames;
+
+			if (error.what() != lastFrameError)
+			{
+				lastFrameError = error.what();
+				std::cerr << "[Render] Frame failed (skipped): " << lastFrameError << '\n';
+			}
+
+			if (failedFrames >= MaxFailedFrames)
+			{
+				std::cerr << "[Render] " << failedFrames << " frames in a row failed; stopping\n";
+				running = false;
+			}
 		}
 	}
 
@@ -2001,6 +2060,11 @@ namespace Engine
 		for (const auto& pass : stats.RecordPasses)
 		{
 			profiler.Add("record", pass.Name, pass.Milliseconds);
+		}
+
+		for (const auto& phase : stats.FeaturePhases)
+		{
+			profiler.Add("feature", phase.Name, phase.Milliseconds);
 		}
 
 		double gpu = 0.0;

@@ -163,8 +163,9 @@ namespace Engine
 		// Submitted frames the GPU has not finished.
 		std::uint32_t GetQueuedFrames();
 
-		// Blocks until the GPU has finished every submitted frame (frame pacing); false on timeout.
-		bool WaitForQueuedFrames(std::uint64_t timeoutNanoseconds);
+		// Blocks until at most `keep` submitted frames are unfinished (frame pacing; 0: the GPU
+		// has finished everything); false on timeout.
+		bool WaitForQueuedFrames(std::uint64_t timeoutNanoseconds, std::uint32_t keep = 0);
 
 		// The present mode from the next frame on (the swapchain is rebuilt); headless ignores it.
 		void SetPresentMode(Swim::Rhi::PresentMode mode);

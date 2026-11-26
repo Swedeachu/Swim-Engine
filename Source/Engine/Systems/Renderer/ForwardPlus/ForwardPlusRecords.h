@@ -31,7 +31,7 @@ namespace Swim::Render
 		ClusterHeatmap = 1,
 	};
 
-	// ForwardPlusRecords.slang's ForwardView (std430, 208 bytes): one per view.
+	// ForwardPlusRecords.slang's ForwardView (std430, 288 bytes): one per view.
 	struct ForwardViewRecord
 	{
 		float ViewProjection[16] = {}; // Row-major rows (clip = M * world), unjittered.
@@ -40,7 +40,7 @@ namespace Swim::Render
 		float CameraForward[3] = { 0, 0, -1 }; // Unit; transparent sort depth axis.
 		float EnvironmentRotation = 0.0f;	   // Radians around +Y.
 		float Ambient[3] = {};				   // Constant ambient radiance.
-		float Reserved0 = 0.0f;
+		float MinimumLight = 0.0f;			   // Full-bright floor (RenderSettings::MinimumLight).
 		std::uint32_t MaterialCount = 0; // GpuMaterialTable rows; others use row 0.
 		std::uint32_t PrefilteredMipCount = 1;
 		std::uint32_t Flags = 0;
@@ -52,9 +52,12 @@ namespace Swim::Render
 		// RenderObjectFlags::Overlay objects: clip.xy scale (tan(camera fov / 2) / tan(overlay
 		// fov / 2)) and near plane (metres); their depth starts at 0.99 (ForwardOverlayDepth).
 		float Overlay[2] = { 1.0f, 0.01f };
+		// Engine::GpuGlint (Features/Glint.h): the sheen of materials with a glint intensity.
+		float Glint[16] = {};
+		std::uint32_t GlintSource[4] = {};
 	};
 
-	static_assert(sizeof(ForwardViewRecord) == 208);
+	static_assert(sizeof(ForwardViewRecord) == 288);
 
 	// ForwardTransparentSort.slang's scratch entry (16 bytes).
 	struct ForwardSortEntry

@@ -29,9 +29,10 @@ namespace Engine
 			LodGpu Lod;
 			Float4 Absorption, Scattering, Viewport;
 			WaveGpu Waves[WaterWaveSet::MaxWaves];
+			GpuDistanceFog Fog;
 		};
 
-		static_assert(sizeof(Params) == 16 * (4 + 3 + 3 + 2 * WaterWaveSet::MaxWaves));
+		static_assert(sizeof(Params) == 16 * (4 + 3 + 3 + 2 * WaterWaveSet::MaxWaves) + sizeof(GpuDistanceFog));
 
 		float InverseRange(float start, float end)
 		{
@@ -102,6 +103,8 @@ namespace Engine
 		p.Absorption = { Settings.Absorption[0], Settings.Absorption[1], Settings.Absorption[2], Settings.Roughness };
 		p.Scattering = { Settings.Scattering[0], Settings.Scattering[1], Settings.Scattering[2], Settings.Refraction };
 		p.Viewport = { float(view.Width), float(view.Height), std::max(Settings.Ripples, 0.0f), float(std::min(Settings.ReflectionSteps, 64u)) };
+
+		p.Fog = PackDistanceFog(Settings.Fog);
 
 		for (std::uint32_t i = 0; i < set->Count; ++i)
 		{

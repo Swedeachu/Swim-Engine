@@ -335,6 +335,8 @@ namespace Engine
 			{
 				std::uint64_t index = 0;
 
+				config.DisplayGiven = true;
+
 				if (hasValue && value == "primary")
 				{
 					config.Window.DisplayIndex = 0;
@@ -526,6 +528,8 @@ namespace Engine
 			}
 			else if (Option(argument, "--window-mode", i, argc, argv, value, hasValue))
 			{
+				config.WindowModeGiven = true;
+
 				if (value == "windowed")
 				{
 					config.Window.Mode = Swim::Platform::WindowMode::Windowed;

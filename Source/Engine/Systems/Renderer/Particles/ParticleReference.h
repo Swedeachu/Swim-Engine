@@ -97,6 +97,19 @@ namespace Swim::Render::Particles
 		Float2 Uv{};
 	};
 
+	// The quad's in-plane axes (unit, before the particle's rotation) and half extents for its
+	// facing mode: width from the size over life, height times the particle's aspect (and the
+	// velocity stretch).
+	struct BillboardAxes
+	{
+		Float3 Right{};
+		Float3 Up{};
+		float HalfWidth = 0.0f;
+		float HalfHeight = 0.0f;
+	};
+
+	BillboardAxes ParticleBillboardAxes(const GpuParticleFrame& frame, const GpuParticleEmitter& e, const GpuParticle& p);
+
 	BillboardVertex BillboardCorner(
 		const GpuParticleFrame& frame, const GpuParticleEmitter& emitter, const GpuParticle& particle, std::uint32_t corner);
 

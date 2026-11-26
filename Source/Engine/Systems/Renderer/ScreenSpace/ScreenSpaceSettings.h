@@ -1,9 +1,13 @@
 #pragma once
+#include "Engine/Systems/Renderer/ScreenSpace/DistanceFog.h"
+
 #include <array>
 #include <cstdint>
 
 namespace Swim::Render
 {
+
+	using ::Engine::FogCurve;
 
 	inline constexpr std::uint32_t MaxAoSlices = 4;
 	inline constexpr std::uint32_t MaxAoSteps = 8;
@@ -40,6 +44,14 @@ namespace Swim::Render
 		float Anisotropy = 0.6f;						// Henyey-Greenstein g, [-0.95, 0.95].
 		float StartDistance = 0.0f;						// Fog begins this far from the camera (>= 0).
 		float MaxDistance = 1000.0f;					// Distances (and the sky) are capped here (> StartDistance).
+		// The curve along the view ray. Exponential is the physical height fog above; the others
+		// ignore Density and height and run from StartDistance to EndDistance, e.g. Power with
+		// Start at half the view distance and End at the view distance for light fog that only
+		// shows at the far edge.
+		FogCurve Curve = FogCurve::Exponential;
+		float EndDistance = 1000.0f; // Where Linear / Smooth / Power reach full fog.
+		float Exponent = 3.0f;		 // Power only.
+		float MaxOpacity = 1.0f;	 // The most fog ever covers (0..1); below 1 the far edge stays visible.
 	};
 
 	// Screen-space reflections (item 76): one mirror ray per pixel, marched through the

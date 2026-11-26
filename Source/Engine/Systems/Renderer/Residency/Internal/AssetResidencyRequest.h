@@ -34,6 +34,7 @@ namespace Swim::Render::Internal
 		Assets::AssetHandle<Assets::TextureAsset> TextureAsset;
 		AssetResidencyState State = AssetResidencyState::Queued;
 		std::uint64_t Sequence = 0; // FIFO order across kinds.
+		bool Urgent = false;		// Read and staged ahead of the FIFO, outside the budget.
 		IO::ReadRequest Read;
 		Jobs::JobHandle Decode;
 		std::shared_ptr<AssetDecodeSlot> Slot;

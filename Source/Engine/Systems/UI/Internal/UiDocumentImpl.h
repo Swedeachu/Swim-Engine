@@ -96,6 +96,7 @@ namespace Swim::UI
 			// Image.
 			bool HasImage = false;
 			UiImage Image;
+			bool SanitizeWarned = false; // A style or image was clamped (logged once per node).
 			// Editing.
 			bool Editable = false;
 			UiTextEditOptions EditOptions;

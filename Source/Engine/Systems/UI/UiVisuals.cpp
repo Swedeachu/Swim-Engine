@@ -30,7 +30,8 @@ namespace Swim::UI
 				return x.Left == y.Left && x.Top == y.Top && x.Right == y.Right && x.Bottom == y.Bottom;
 			};
 			return a.Texture == b.Texture && a.Sampler == b.Sampler && a.Size.X == b.Size.X && a.Size.Y == b.Size.Y && rect(a.Uv, b.Uv) &&
-				edges(a.Slice, b.Slice) && edges(a.SliceUv, b.SliceUv) && SameColor(a.Tint, b.Tint) && a.Fit == b.Fit && a.Blend == b.Blend;
+				edges(a.Slice, b.Slice) && edges(a.SliceUv, b.SliceUv) && SameColor(a.Tint, b.Tint) && a.Fit == b.Fit &&
+				a.Blend == b.Blend && a.Glint == b.Glint;
 		}
 
 		bool SameVisual(const UiResolvedVisual& a, const UiResolvedVisual& b)

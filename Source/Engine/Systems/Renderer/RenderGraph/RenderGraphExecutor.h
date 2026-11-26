@@ -64,10 +64,12 @@ namespace Swim::Render
 		struct ExecuteTimings
 		{
 			double Wait = 0.0;		 // For the predecessor submission.
+			double Reset = 0.0;		 // Command pool reset, descriptor table recycling.
 			double Allocate = 0.0;	 // Transient resources from the pool (or new ones).
 			double Stage = 0.0;		 // Upload writers into the staging arena.
 			double Queries = 0.0;	 // Timestamp query pool.
 			double Record = 0.0;	 // Every pass callback and barrier.
+			double Barriers = 0.0;	 // Of Record: recording the graph's barriers.
 			double Submit = 0.0;	 // Flush, queue submission.
 			std::vector<GraphPassTiming> Passes; // CPU milliseconds per pass callback (Nanoseconds holds ns).
 		};

@@ -203,14 +203,14 @@ namespace Engine
 
 			if (settings.AntiAliasing == AntiAliasingMode::Fxaa)
 			{
-				constants.Threshold = 0.125f;
+				constants.Threshold = 0.166f;
 				const auto output = context.CreateColorTarget("FXAA");
 				context.Compute("ScreenAaFxaa").Texture("Color", color).Sampler("LinearClamp").Storage("Output", output).Constants(constants).Dispatch(width, height);
 				color = output;
 			}
 			else if (settings.AntiAliasing == AntiAliasingMode::Smaa1x)
 			{
-				constants.Threshold = 0.1f;
+				constants.Threshold = 0.15f;
 				const auto edges = context.CreateTexture(S::Format::RGBA8Unorm, width, height, "AA edges");
 				const auto weights = context.CreateTexture(S::Format::RGBA16Float, width, height, "AA weights");
 				const auto output = context.CreateColorTarget("Morphological AA");
@@ -319,6 +319,9 @@ namespace Engine
 		clampFinite(ScreenSpace.AmbientOcclusion.Power, 0.1f, 8.0f, 1.0f);
 		clampFinite(ScreenSpace.Fog.Density, 0.0f, 10.0f, 0.02f);
 		clampFinite(ScreenSpace.Fog.HeightFalloff, 0.0f, 10.0f, 0.1f);
+		clampFinite(ScreenSpace.Fog.EndDistance, 0.0f, 1.0e6f, 1000.0f);
+		clampFinite(ScreenSpace.Fog.Exponent, 0.01f, 64.0f, 3.0f);
+		clampFinite(ScreenSpace.Fog.MaxOpacity, 0.0f, 1.0f, 1.0f);
 	}
 
 	struct FrameRenderer::Impl
@@ -365,6 +368,9 @@ namespace Engine
 		std::uint32_t materialSampler = 0;
 		std::uint32_t pointMaterialSampler = 0;
 		bool whiteUploaded = false;
+		std::optional<R::BindlessTextureHandle> glintTexture;
+		Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> glintAsset;
+		std::chrono::steady_clock::time_point glintEpoch = std::chrono::steady_clock::now();
 
 		// Residency and scene.
 		std::unique_ptr<R::GeometryHeap> geometry;
@@ -1055,6 +1061,11 @@ namespace Engine
 			device, R::GpuMaterialTableDesc{ materialTemplate, desc.MaxMaterials, "Runtime materials" });
 		materials = std::make_unique<MaterialLibrary>(*materialTable, materialTemplate, *residency, materialSampler, pointMaterialSampler);
 		meshes = std::make_unique<MeshLibrary>(assets, *residency, *geometry);
+		materials->SetTextureResolver(
+			[library = meshes.get()](MeshLibrary::TextureHandle texture)
+			{
+				return library->Resolve(texture);
+			});
 
 		scene = std::make_unique<R::GpuScene>(device, R::GpuSceneDesc{ desc.MaxObjects, "Runtime scene" });
 		lights = std::make_unique<R::GpuLightBuffer>(
@@ -1201,6 +1212,14 @@ namespace Engine
 		ui = std::make_unique<R::UiRenderer>();
 		atlasTextures = std::make_unique<R::UiAtlasTextures>(device, *bindless);
 		viewports = std::make_unique<SceneViewports>(device, *bindless);
+		viewports->SetAssetResolver({ [library = meshes.get()](MeshLibrary::MeshHandle mesh)
+			{
+				return library->Resolve(mesh);
+			},
+			[library = meshes.get()](MeshLibrary::TextureHandle texture)
+			{
+				return library->Resolve(texture);
+			} });
 
 		materials->SetRouter(
 			[this](std::uint32_t set, const R::StandardPbr::Parameters& parameters)
@@ -1434,6 +1453,35 @@ namespace Engine
 		return *impl->bindless;
 	}
 
+	void FrameRenderer::SetGlintTexture(Swim::Rhi::TextureView* view)
+	{
+		auto& I = *impl;
+
+		if (I.glintTexture)
+		{
+			I.bindless->Release(*I.glintTexture, lastCompletion);
+			I.glintTexture.reset();
+		}
+
+		I.glintAsset = {};
+
+		if (view)
+		{
+			I.glintTexture = I.bindless->TryRegisterTexture(*view);
+		}
+	}
+
+	void FrameRenderer::SetGlintTexture(Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> texture)
+	{
+		SetGlintTexture(static_cast<Swim::Rhi::TextureView*>(nullptr));
+
+		if (texture.IsValid())
+		{
+			impl->glintAsset = texture;
+			impl->residency->MakeUrgent(texture);
+		}
+	}
+
 	R::AssetResidencyService& FrameRenderer::GetResidency() const
 	{
 		return *impl->residency;
@@ -1461,6 +1509,7 @@ namespace Engine
 		impl->skinning->Collect();
 		impl->atlasTextures->Collect();
 		impl->viewports->Collect();
+		impl->bindless->Collect(); // Also done by the UI owners; the scene's textures must not depend on them.
 		impl->CollectPrograms();
 		impl->meshes->FlushReleases(lastCompletion);
 		impl->residency->Update();
@@ -1547,7 +1596,21 @@ namespace Engine
 		device.AdvanceFrameSlot();
 		auto& executor = device.GetExecutor();
 		settings.Sanitize();
+		const float glintTime = std::chrono::duration<float>(Clock::now() - I.glintEpoch).count();
+		std::uint32_t glintIndex = 0;
+
+		if (I.glintTexture)
+		{
+			glintIndex = I.bindless->GetIndex(*I.glintTexture);
+		}
+		else if (I.glintAsset.IsValid())
+		{
+			glintIndex = I.residency->GetBindlessIndex(I.glintAsset);
+		}
+
+		const auto glint = Engine::PackGlint(settings.Glint, glintTime, glintIndex, I.materialSampler);
 		stats.CpuPhases.clear();
+		stats.FeaturePhases.clear();
 		auto lapStart = cpuStart;
 		const auto lap = [&](const char* name)
 		{
@@ -1767,7 +1830,10 @@ namespace Engine
 
 					try
 					{
+						const auto featureStart = Clock::now();
 						auto resources = feature->PrepareGeometry(context);
+						stats.FeaturePhases.push_back({ std::string(feature->GetName()) + ": geometry",
+							std::chrono::duration<double, std::milli>(Clock::now() - featureStart).count() });
 						R::ExternalGeometryDraws draws;
 						draws.Passes = passes;
 						draws.Buffers = std::move(resources.Buffers);
@@ -2181,6 +2247,17 @@ namespace Engine
 				forwardFrame.View.CameraPosition = camera.Position;
 				forwardFrame.View.CameraForward = camera.Forward;
 				forwardFrame.View.Ambient = settings.Ambient;
+				forwardFrame.View.MinimumLight = settings.MinimumLight;
+
+				for (std::size_t i = 0; i < 4; ++i)
+				{
+					forwardFrame.View.Glint[i] = glint.ColorA[i];
+					forwardFrame.View.Glint[4 + i] = glint.ColorB[i];
+					forwardFrame.View.Glint[8 + i] = glint.Motion[i];
+					forwardFrame.View.Glint[12 + i] = glint.Extra[i];
+				}
+
+				forwardFrame.View.GlintSource = glint.Source;
 				forwardFrame.View.EnvironmentIntensity = settings.EnvironmentIntensity;
 				forwardFrame.View.EnvironmentRotation = settings.EnvironmentRotation;
 				forwardFrame.View.DebugMode = settings.Debug;
@@ -2865,7 +2942,10 @@ namespace Engine
 					// log line instead of failing every frame.
 					try
 					{
+						const auto featureStart = Clock::now();
 						feature->Record(context);
+						stats.FeaturePhases.push_back({ std::string(feature->GetName()) + ": record",
+							std::chrono::duration<double, std::milli>(Clock::now() - featureStart).count() });
 					}
 					catch (const std::exception& error)
 					{
@@ -2984,6 +3064,11 @@ namespace Engine
 					uiFrame.Atlas = &atlasFrame;
 					uiFrame.Images = viewportTextures;
 					uiFrame.Composition.Encoding = R::UiOutputEncoding::Srgb;
+					uiFrame.Glint.Mode = glint.Source[0];
+					uiFrame.Glint.Color = glint.ColorA;
+					uiFrame.Glint.Texture = glint.Source[1];
+					uiFrame.Glint.Sampler = glint.Source[2];
+					uiFrame.Glint.Time = glint.Motion[3] * glint.Extra[3];
 
 					if (I.ui->Record(graph, uiFrame, program, I.bindless->GetTable()))
 					{
@@ -3040,9 +3125,10 @@ namespace Engine
 			lap("Record and submit");
 			{
 				const auto& t = executor.GetLastExecuteTimings();
-				stats.RecordPhases = { { "Executor: wait", t.Wait }, { "Executor: allocate transients", t.Allocate },
-					{ "Executor: stage uploads", t.Stage }, { "Executor: query pool", t.Queries }, { "Executor: record passes", t.Record },
-					{ "Executor: submit", t.Submit } };
+				stats.RecordPhases = { { "Executor: wait", t.Wait }, { "Executor: reset and recycle tables", t.Reset },
+					{ "Executor: allocate transients", t.Allocate }, { "Executor: stage uploads", t.Stage },
+					{ "Executor: query pool", t.Queries }, { "Executor: record passes", t.Record },
+					{ "Executor: barriers (in record)", t.Barriers }, { "Executor: submit", t.Submit } };
 				stats.RecordPasses.clear();
 
 				for (const auto& pass : t.Passes)

@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -147,12 +148,23 @@ namespace Engine
 
 		void Collect();
 
+		// Maps item assets to the ones to draw (MeshLibrary::Resolve: names registered again).
+		struct AssetResolver
+		{
+			std::function<Swim::Assets::AssetHandle<Swim::Assets::MeshAsset>(Swim::Assets::AssetHandle<Swim::Assets::MeshAsset>)> Mesh;
+			std::function<Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>(Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>)>
+				Texture;
+		};
+
+		void SetAssetResolver(AssetResolver value) { resolver = std::move(value); }
+
 		void Drain();
 
 		static Swim::Rhi::GraphicsPipelineDesc PipelineDesc(Swim::Rhi::ShaderProgram& program, Swim::Rhi::PipelineLayout& layout);
 
 	  private:
 
+		AssetResolver resolver;
 		struct Viewport;
 		struct Retired;
 

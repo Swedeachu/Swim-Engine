@@ -178,6 +178,7 @@ function(swim_configure_tests)
 		RenderParticles
 		RenderSkinning
 		Animation
+		Replay
 		Commands
 	)
 
@@ -195,6 +196,7 @@ function(swim_configure_tests)
 	set(SWIM_TEST_MODULE_SOURCES
 		${SWIM_RENDER_GRAPH_SOURCES}
 		${SWIM_ANIMATION_SOURCES}
+		${SWIM_REPLAY_SOURCES}
 		${SWIM_CORE_SOURCES}
 		${SWIM_COMMANDS_SOURCES}
 		${SWIM_MEMORY_SOURCES}
@@ -274,8 +276,16 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_ENGINE_RUNTIME_SUITES})
 		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_ENGINE_SOURCES} ${SWIM_GAME_SOURCES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES EnTT::EnTT spdlog::spdlog glm::glm)
+		if(WIN32)
+			list(APPEND SWIM_TEST_LINK_LIBRARIES ws2_32) # Tooling/Runtime loopback transport.
+		endif()
 		if(TARGET SwimShaderCompiler)
 			list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::ShaderCompiler)
+		endif()
+		# Audio file decoding (replay music) without the playback backend: tests open no device.
+		if(SWIM_AUDIO_AVAILABLE)
+			list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::Miniaudio)
+			set(SWIM_TEST_DECODES_AUDIO TRUE)
 		endif()
 		set(SWIM_TEST_COMPILES_ENGINE TRUE)
 	endif()
@@ -367,6 +377,9 @@ function(swim_configure_tests)
 			SWIM_TEST_ASSET_ROOT="${PROJECT_SOURCE_DIR}/Assets"
 			$<$<CONFIG:Debug>:_SWIM_DEBUG>
 		)
+		if(SWIM_TEST_DECODES_AUDIO)
+			target_compile_definitions(SwimTests PRIVATE SWIM_AUDIO_DECODE_MINIAUDIO=1)
+		endif()
 	endif()
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		target_compile_definitions(SwimTests PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})

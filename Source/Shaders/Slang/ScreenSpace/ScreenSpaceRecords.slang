@@ -21,12 +21,11 @@ struct ScreenSpaceParams
 	uint AoEnabled;
 	uint FogEnabled;
 	uint SsrEnabled;
-	float3 FogColor;
-	float FogDensity;
-	float3 FogSunColor;
-	float FogHeightFalloff;
-	float3 FogSunDirection;
-	float FogBaseHeight;
+	// FogColor, FogDensity; FogSunColor, FogHeightFalloff; FogSunDirection, FogBaseHeight
+	// (one load each).
+	float4 FogColorDensity;
+	float4 FogSunColorFalloff;
+	float4 FogSunDirectionBase;
 	float FogAnisotropy;
 	float FogStartDistance;
 	float FogMaxDistance;
@@ -52,6 +51,7 @@ struct ScreenSpaceParams
 	float ReflectionTemporalBlend;
 	uint PlanarCount; // Active planar reflection records (composite).
 	float SsrMaxFootprint; // ReflectionSettings::MaxFootprint (0: off).
+	float4 FogCurve;	   // FogSettings: curve, end distance, exponent, max opacity.
 };
 
 static const float ScreenSpacePi = 3.14159265358979;

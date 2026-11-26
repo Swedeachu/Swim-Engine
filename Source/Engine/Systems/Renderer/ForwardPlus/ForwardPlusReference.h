@@ -29,6 +29,7 @@ namespace Swim::Render
 		std::array<float, 3> CameraPosition{ 0, 0, 0 };
 		std::array<float, 3> CameraForward{ 0, 0, -1 }; // Normalized when packed.
 		std::array<float, 3> Ambient{ 0, 0, 0 };
+		float MinimumLight = 0.0f; // RenderSettings::MinimumLight.
 		float EnvironmentIntensity = 1.0f;
 		float EnvironmentRotation = 0.0f;
 		ForwardPlusDebugMode DebugMode = ForwardPlusDebugMode::None;
@@ -37,6 +38,9 @@ namespace Swim::Render
 		// OverlayNear / w mapped into [0.99, 1] (reverse-Z), in front of the scene.
 		float OverlayFovScale = 1.0f;
 		float OverlayNear = 0.01f;
+		// Engine::GpuGlint (PackGlint): ColorA, ColorB, Motion, Extra; then Source.
+		std::array<float, 16> Glint{};
+		std::array<std::uint32_t, 4> GlintSource{};
 	};
 
 	// Throws std::invalid_argument for a non-finite matrix/position/jitter, a zero forward

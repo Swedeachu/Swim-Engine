@@ -62,6 +62,14 @@ namespace Swim::Render
 
 		bool RequestTexture(Assets::AssetHandle<Assets::TextureAsset> texture);
 
+		// Requests (if needed) and moves the asset ahead of the queue: urgent requests read
+		// and stage before every other one, and stage even past the per-update byte budget.
+		// Meant for a few small assets someone is waiting on (UI, icons), not for bulk loads.
+		// False for handles that are not current.
+		bool MakeUrgent(Assets::AssetHandle<Assets::MeshAsset> mesh);
+
+		bool MakeUrgent(Assets::AssetHandle<Assets::TextureAsset> texture);
+
 		// lastUse must cover every submission that may read the GPU data. Uploads
 		// recorded by a pending Import must be committed or aborted first.
 		bool ReleaseMesh(Assets::AssetHandle<Assets::MeshAsset> mesh, Rhi::TimelinePoint lastUse = {});
@@ -107,6 +115,8 @@ namespace Swim::Render
 		using Kind = Internal::ResidencyAssetKind;
 
 		template <typename T> bool RequestAsset(Kind kind, Assets::AssetHandle<T> handle);
+
+		template <typename T> bool MakeAssetUrgent(Kind kind, Assets::AssetHandle<T> handle);
 
 		template <typename T> bool ReleaseAsset(Assets::AssetHandle<T> handle, Rhi::TimelinePoint lastUse);
 
