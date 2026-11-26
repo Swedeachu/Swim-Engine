@@ -180,7 +180,7 @@ namespace Engine
 		// FXAA or the morphological edges/weights/blend chain, then sharpening, on the
 		// display-referred frame (RGBA8 sRGB-encoded, ScreenAntiAliasing.slang).
 		R::GraphTexture RecordScreenAntiAliasing(R::RenderGraph& graph, const RenderFeatureView& view, const RenderSettings& settings,
-			R::GraphTexture color, RenderFeatureContext::Services services)
+			R::GraphTexture color, R::GraphTexture depth, std::optional<R::GraphTexture> normal, RenderFeatureContext::Services services)
 		{
 			struct Constants
 			{
@@ -188,7 +188,8 @@ namespace Engine
 				float InvSize[2];
 				float Threshold;
 				float Strength;
-				std::uint32_t Reserved[2];
+				std::uint32_t Crisp;
+				std::uint32_t Reserved;
 			} constants{};
 
 			static_assert(sizeof(Constants) == 32);
@@ -197,6 +198,9 @@ namespace Engine
 			constants.InvSize[0] = 1.0f / float(std::max(view.Width, 1u));
 			constants.InvSize[1] = 1.0f / float(std::max(view.Height, 1u));
 			constants.Strength = settings.Sharpening;
+			constants.Crisp = settings.CrispAntiAliasing && normal ? 1u : 0u;
+			// Without a normal target the gate is off; the colour stands in for the binding.
+			const auto normals = normal ? *normal : color;
 			RenderFeatureContext context(graph, RenderFeatureStage::AfterPostProcess, view, settings, color, color, std::move(services));
 			const auto width = view.Width;
 			const auto height = view.Height;
@@ -205,7 +209,14 @@ namespace Engine
 			{
 				constants.Threshold = 0.166f;
 				const auto output = context.CreateColorTarget("FXAA");
-				context.Compute("ScreenAaFxaa").Texture("Color", color).Sampler("LinearClamp").Storage("Output", output).Constants(constants).Dispatch(width, height);
+				context.Compute("ScreenAaFxaa")
+					.Texture("Color", color)
+					.Texture("Depth", depth)
+					.Texture("Normal", normals)
+					.Sampler("LinearClamp")
+					.Storage("Output", output)
+					.Constants(constants)
+					.Dispatch(width, height);
 				color = output;
 			}
 			else if (settings.AntiAliasing == AntiAliasingMode::Smaa1x)
@@ -214,7 +225,13 @@ namespace Engine
 				const auto edges = context.CreateTexture(S::Format::RGBA8Unorm, width, height, "AA edges");
 				const auto weights = context.CreateTexture(S::Format::RGBA16Float, width, height, "AA weights");
 				const auto output = context.CreateColorTarget("Morphological AA");
-				context.Compute("ScreenAaEdges").Texture("Color", color).Storage("Edges", edges).Constants(constants).Dispatch(width, height);
+				context.Compute("ScreenAaEdges")
+					.Texture("Color", color)
+					.Texture("Depth", depth)
+					.Texture("Normal", normals)
+					.Storage("Edges", edges)
+					.Constants(constants)
+					.Dispatch(width, height);
 				context.Compute("ScreenAaWeights").Texture("Edges", edges).Storage("Weights", weights).Constants(constants).Dispatch(width, height);
 				context.Compute("ScreenAaBlend")
 					.Texture("Color", color)
@@ -591,6 +608,8 @@ namespace Engine
 		// History.
 		std::optional<std::array<float, 16>> previousViewProjection;
 		std::uint64_t frameIndex = 0;
+		std::uint32_t residentMeshes = 0; // Stats only: counted every 32 frames (a scan of every mesh).
+		std::uint32_t residentTextures = 0;
 		double featureTime = 0.0;
 		std::unordered_map<std::string, std::unique_ptr<RuntimeComputeProgram>> featurePrograms; // Loaded on first use.
 		// Feature geometry programs: space 0 is the pass's frame schema (the union of the
@@ -2997,7 +3016,8 @@ namespace Engine
 			if (draw3D && (settings.AntiAliasing == AntiAliasingMode::Fxaa || settings.AntiAliasing == AntiAliasingMode::Smaa1x ||
 							  settings.Sharpening > 0.0f))
 			{
-				postOutput = RecordScreenAntiAliasing(graph, featureView, settings, postOutput, featureServices());
+				postOutput =
+					RecordScreenAntiAliasing(graph, featureView, settings, postOutput, targets.Depth, targets.Normal, featureServices());
 			}
 
 			{
@@ -3282,8 +3302,14 @@ namespace Engine
 		stats.DirectionalLights = lightStats.DirectionalLights;
 		stats.LocalLights = lightStats.LocalLights;
 		stats.SkinnedInstances = I.skinning->GetStats().Instances;
-		stats.ResidentMeshes = I.meshes->GetResidentMeshCount();
-		stats.ResidentTextures = I.meshes->GetResidentTextureCount();
+		if (I.frameIndex % 32 == 0)
+		{
+			I.residentMeshes = I.meshes->GetResidentMeshCount();
+			I.residentTextures = I.meshes->GetResidentTextureCount();
+		}
+
+		stats.ResidentMeshes = I.residentMeshes;
+		stats.ResidentTextures = I.residentTextures;
 		stats.PendingAssets =
 			(I.meshes->GetRequestedMeshCount() - stats.ResidentMeshes) + (I.meshes->GetRequestedTextureCount() - stats.ResidentTextures);
 		stats.CpuMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - cpuStart).count();

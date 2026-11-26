@@ -61,6 +61,11 @@ function(swim_add_slang_program name)
 		# Do not let Slang infer R32ui for that array. Writable images retain
 		# their explicit [format(...)] qualifiers, required by RHI reflection.
 		set(SWIM_SLANG_PROGRAM_TARGET_ARGS -fvk-use-entrypoint-name -default-image-format-unknown)
+		if(SWIM_SHADER_DEBUG_INFO)
+			# Source-level debug info (NonSemantic.Shader.DebugInfo, sources embedded) for GPU
+			# profilers, at the default optimisation level, so the measured code is the release code.
+			list(APPEND SWIM_SLANG_PROGRAM_TARGET_ARGS -g2 -debug-info-include-source)
+		endif()
 	elseif(SWIM_SLANG_PROGRAM_TARGET STREQUAL "glsl")
 		if(NOT SWIM_SLANG_PROGRAM_PROFILE)
 			set(SWIM_SLANG_PROGRAM_PROFILE "glsl_460")

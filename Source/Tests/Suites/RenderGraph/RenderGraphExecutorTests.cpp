@@ -23,7 +23,7 @@ SWIM_TEST("RenderGraph.Execute", "WaitsBeforePoolingAndKeepsExportsUntilReuse")
 		[&](auto& c)
 		{
 			++calls;
-			SWIM_CHECK_EQUAL(c.Get(buffer).GetDesc().Size, 64u);
+			SWIM_CHECK_EQUAL(c.Get(buffer).GetDesc().Size, 256u); // Pooled sizes are rounded up to a size class.
 		});
 	graph.Export(buffer, S::ShaderRead);
 	RenderGraphExecutor executor(device);
@@ -209,32 +209,34 @@ SWIM_TEST("RenderGraph.Execute", "CompileCacheReusesAnUnchangedShapeAndInvalidat
 	SWIM_CHECK_EQUAL(cache.GetHits(), 2u);
 	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
 
-	// A resize changes the shape: compiled again, new allocations and tables.
-	const auto resized = frame(128, false);
+	// A resize changes the shape: compiled again and new allocations; descriptor tables
+	// (same layout and space) are shared across shapes.
+	const auto resized = frame(1024, false);
 	SWIM_CHECK_EQUAL(cache.GetMisses(), 2u);
 	SWIM_CHECK(!resized.SharesShape(first));
-	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 2u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
 	SWIM_CHECK_EQUAL(device.BufferCreateCount, 2u);
-	frame(128, false);
+	frame(1024, false);
 	SWIM_CHECK_EQUAL(cache.GetHits(), 3u);
-	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 2u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
 
-	// A pass added or removed changes it too.
-	frame(128, true);
+	// A pass added changes it too; going back finds the earlier shape still cached.
+	frame(1024, true);
 	SWIM_CHECK_EQUAL(cache.GetMisses(), 3u);
-	frame(128, false);
-	SWIM_CHECK_EQUAL(cache.GetMisses(), 4u);
-	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 4u);
+	frame(1024, false);
+	SWIM_CHECK_EQUAL(cache.GetMisses(), 3u);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 4u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
 
 	// A destroyed pipeline layout drops the cached tables (a new one could reuse the address),
 	// but the compiled shape stays valid.
-	frame(128, false);
-	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 4u);
+	frame(1024, false);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
 	device.PipelineLayoutGeneration = 1;
-	frame(128, false);
-	SWIM_CHECK_EQUAL(cache.GetHits(), 5u);
-	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 5u);
-	frame(128, false);
-	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 5u);
+	frame(1024, false);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 6u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 2u);
+	frame(1024, false);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 2u);
 	SWIM_CHECK_EQUAL(executor.GetCachedDescriptorTableCount(), 0u); // Handed back out to the last frame.
 }

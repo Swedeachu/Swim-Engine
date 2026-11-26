@@ -217,6 +217,7 @@ namespace Engine
 	MeshLibrary::MeshHandle MeshLibrary::Register(std::string_view name, const ProceduralMeshes::MeshData& mesh)
 	{
 		const std::string path = ProceduralPath(name);
+		++meshesVersion;
 		auto& slot = meshes[path];
 
 		// A resident asset is never re-uploaded, so every registration publishes its own asset
@@ -257,6 +258,7 @@ namespace Engine
 		{
 			released.push_back(found->second);
 			meshes.erase(found);
+			++meshesVersion;
 		}
 	}
 
@@ -305,6 +307,7 @@ namespace Engine
 
 		residency.RequestMesh(handle);
 		meshes[std::string(logicalPath)] = handle;
+		++meshesVersion;
 		names[handle.GetId().Value] = std::string(logicalPath);
 		return handle;
 	}
@@ -487,16 +490,29 @@ namespace Engine
 		if (mesh && std::find(extraMeshes.begin(), extraMeshes.end(), mesh) == extraMeshes.end())
 		{
 			extraMeshes.push_back(mesh);
+			++meshesVersion;
 		}
 	}
 
 	void MeshLibrary::UntrackGpuMesh(Swim::Render::GpuMeshHandle mesh)
 	{
 		extraMeshes.erase(std::remove(extraMeshes.begin(), extraMeshes.end(), mesh), extraMeshes.end());
+		++meshesVersion;
 	}
 
 	std::vector<MeshLibrary::PageSlot> MeshLibrary::CollectPageSlots(bool* conflict) const
 	{
+		// Builtins are fixed; meshes map to GPU meshes only through heap creation/destruction.
+		if (pageSlotsKey[0] == meshesVersion && pageSlotsKey[1] == heap.GetGeneration())
+		{
+			if (conflict)
+			{
+				*conflict = pageSlotsConflict;
+			}
+
+			return pageSlots;
+		}
+
 		std::vector<PageSlot> slots;
 		bool clash = false;
 		const auto add = [&](Swim::Render::GpuMeshHandle mesh)
@@ -551,6 +567,10 @@ namespace Engine
 			*conflict = clash;
 		}
 
+		pageSlotsKey[0] = meshesVersion;
+		pageSlotsKey[1] = heap.GetGeneration();
+		pageSlots = slots;
+		pageSlotsConflict = clash;
 		return slots;
 	}
 

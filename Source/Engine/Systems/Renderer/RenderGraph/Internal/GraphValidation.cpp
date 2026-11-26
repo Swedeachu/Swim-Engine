@@ -1,4 +1,5 @@
 #include "Engine/Systems/Renderer/RenderGraph/Internal/GraphValidation.h"
+#include <bit>
 
 namespace Swim::Render::Internal
 {
@@ -215,16 +216,24 @@ namespace Swim::Render::Internal
 		}
 
 		std::vector<std::uint32_t> result;
-
-		for (std::uint32_t layer = range.BaseArrayLayer; layer < range.BaseArrayLayer + range.ArrayLayerCount; ++layer)
-		{
-			for (std::uint32_t mip = range.BaseMipLevel; mip < range.BaseMipLevel + range.MipLevelCount; ++mip)
+		result.reserve(std::size_t(range.ArrayLayerCount) * range.MipLevelCount);
+		ForEachCell(r, range,
+			[&](std::uint32_t cell)
 			{
-				result.push_back(layer * r.Texture.MipLevels + mip);
-			}
+				result.push_back(cell);
+			});
+		return result;
+	}
+
+	std::uint64_t PooledBufferSize(std::uint64_t size)
+	{
+		if (size <= 256)
+		{
+			return 256;
 		}
 
-		return result;
+		const auto step = std::bit_floor(size - 1) / 4;
+		return (size + step - 1) / step * step;
 	}
 
 	bool Compatible(const GraphResource& a, const GraphResource& b)
@@ -236,8 +245,8 @@ namespace Swim::Render::Internal
 
 		if (a.Kind == GraphKind::Buffer)
 		{
-			return a.Buffer.Size == b.Buffer.Size && a.Buffer.Usage == b.Buffer.Usage && a.Buffer.Memory == b.Buffer.Memory &&
-				a.Buffer.PersistentMap == b.Buffer.PersistentMap;
+			return PooledBufferSize(a.Buffer.Size) == PooledBufferSize(b.Buffer.Size) && a.Buffer.Usage == b.Buffer.Usage &&
+				a.Buffer.Memory == b.Buffer.Memory && a.Buffer.PersistentMap == b.Buffer.PersistentMap;
 		}
 
 		const auto& x = a.Texture;

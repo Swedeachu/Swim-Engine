@@ -83,9 +83,13 @@ namespace Swim::Render
 
 		GeometryHeapStats GetStats() const;
 
+		// Changes whenever a mesh is created or destroyed (its pages can differ).
+		std::uint64_t GetGeneration() const { return generation; }
+
 		static Rhi::ResourceState GetRestingState(Internal::GeometryStream stream);
 
 	  private:
+		std::uint64_t generation = 0;
 
 		using Stream = Internal::GeometryStream;
 

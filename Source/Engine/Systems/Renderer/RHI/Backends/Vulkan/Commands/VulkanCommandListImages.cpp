@@ -7,6 +7,8 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanBuffer.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTexture.h"
 
+#include <vector>
+
 namespace Swim::RhiVulkan
 {
 
@@ -23,6 +25,56 @@ namespace Swim::RhiVulkan
 	{
 		RequireRecording(true);
 		RequireImageQueue();
+		const auto barrier = MakeImageBarrier(texture, before, after, range);
+		VkDependencyInfo dependency{};
+		dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		dependency.imageMemoryBarrierCount = 1;
+		dependency.pImageMemoryBarriers = &barrier;
+		GetState()->Dispatch.vkCmdPipelineBarrier2(commandBuffer, &dependency);
+	}
+
+	void VulkanCommandList::Transitions(std::span<const BufferBarrier> buffers, std::span<const TextureBarrier> textures)
+	{
+		if (buffers.empty() && textures.empty())
+		{
+			return;
+		}
+
+		RequireRecording(true);
+
+		if (!textures.empty())
+		{
+			RequireImageQueue();
+		}
+
+		// Reused per thread: a frame records hundreds of these.
+		thread_local std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+		thread_local std::vector<VkImageMemoryBarrier2> imageBarriers;
+		bufferBarriers.clear();
+		imageBarriers.clear();
+
+		for (const auto& barrier : buffers)
+		{
+			bufferBarriers.push_back(MakeBufferBarrier(*barrier.Resource, barrier.Before, barrier.After));
+		}
+
+		for (const auto& barrier : textures)
+		{
+			imageBarriers.push_back(MakeImageBarrier(*barrier.Resource, barrier.Before, barrier.After, barrier.Range));
+		}
+
+		VkDependencyInfo dependency{};
+		dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		dependency.bufferMemoryBarrierCount = static_cast<std::uint32_t>(bufferBarriers.size());
+		dependency.pBufferMemoryBarriers = bufferBarriers.data();
+		dependency.imageMemoryBarrierCount = static_cast<std::uint32_t>(imageBarriers.size());
+		dependency.pImageMemoryBarriers = imageBarriers.data();
+		GetState()->Dispatch.vkCmdPipelineBarrier2(commandBuffer, &dependency);
+	}
+
+	VkImageMemoryBarrier2 VulkanCommandList::MakeImageBarrier(
+		Rhi::Texture& texture, Rhi::ResourceState before, Rhi::ResourceState after, const Rhi::TextureSubresourceRange& range) const
+	{
 		const auto graphicsOnly = Rhi::ResourceState::ColorAttachment | Rhi::ResourceState::DepthStencilRead |
 			Rhi::ResourceState::DepthStencilWrite | Rhi::ResourceState::Present;
 
@@ -53,11 +105,7 @@ namespace Swim::RhiVulkan
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.image = FromNativeHandle<VkImage>(texture.GetNativeHandle());
 		barrier.subresourceRange = GetSubresourceRange(texture.GetDesc(), range);
-		VkDependencyInfo dependency{};
-		dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		dependency.imageMemoryBarrierCount = 1;
-		dependency.pImageMemoryBarriers = &barrier;
-		GetState()->Dispatch.vkCmdPipelineBarrier2(commandBuffer, &dependency);
+		return barrier;
 	}
 
 	void VulkanCommandList::CopyTexture(Rhi::Texture& source, Rhi::Texture& destination, const Rhi::TextureCopyRegion& region)

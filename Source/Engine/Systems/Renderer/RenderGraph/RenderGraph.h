@@ -22,9 +22,18 @@ namespace Swim::Render
 	  private:
 
 		friend class RenderGraph;
-		std::vector<std::uint64_t> key;
+
+		// Recent shapes, most recently used last: frames alternate between a few graphs (an
+		// upload present on some frames), and each keeps its compiled shape.
+		struct Entry
+		{
+			std::vector<std::uint64_t> Key;
+			std::shared_ptr<const Internal::GraphShape> Shape;
+		};
+
+		static constexpr std::size_t Capacity = 8;
+		std::vector<Entry> entries;
 		std::vector<std::uint64_t> scratch;
-		std::shared_ptr<const Internal::GraphShape> shape;
 		std::uint64_t hits = 0;
 		std::uint64_t misses = 0;
 

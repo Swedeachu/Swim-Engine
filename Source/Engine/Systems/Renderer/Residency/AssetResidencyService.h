@@ -154,7 +154,7 @@ namespace Swim::Render
 		std::vector<Jobs::JobHandle> abandoned; // Decode jobs of released requests.
 		std::uint64_t nextSequence = 0;
 		AssetResidencyStats totals;
-
+		bool idle = false; // Every request settled at the last Update: skip the per-request passes.
 	};
 
 } // namespace Swim::Render

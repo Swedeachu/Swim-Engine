@@ -102,26 +102,36 @@ namespace Engine
 		stats.GpuWaitMilliseconds = 0.0;
 		const auto cap = fpsMax->GetInt();
 
-		if (cap > 0 && haveLast)
-		{
-			const auto deadline = lastStart + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / double(cap)));
-			const auto before = Clock::now();
-
-			if (before < deadline)
-			{
-				Swim::Platform::SleepPrecise(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - before).count()));
-				stats.CapWaitMilliseconds = Milliseconds(Clock::now() - before);
-			}
-		}
-
 		if (lowLatency->GetBool() && device)
 		{
 			const auto before = Clock::now();
 			// At most one frame stays queued: the GPU draws the previous frame while this one is
 			// built, so a frame costs max(CPU, GPU) instead of CPU + GPU, for at most one frame
-			// of GPU time more latency than an empty queue (and still far less than vsync's).
+			// of GPU time more latency than an empty queue (and still far less than vsync's). It goes
+			// before the cap: a GPU-bound frame blocks here instead of spinning in the cap's sleep.
 			device->WaitForQueuedFrames(100'000'000, 1);
 			stats.GpuWaitMilliseconds = Milliseconds(Clock::now() - before);
+		}
+
+		if (cap > 0 && haveLast)
+		{
+			// Deadlines advance by one period on a schedule, not from each frame's start: a fast
+			// frame after slow ones catches up instead of being held (that would idle the GPU),
+			// so the cap limits the average rate. A schedule far behind restarts from now.
+			const auto period = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / double(cap)));
+			const auto before = Clock::now();
+			capDeadline = before - capDeadline > 4 * period ? before : capDeadline + period;
+
+			if (before < capDeadline)
+			{
+				Swim::Platform::SleepPrecise(
+					static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(capDeadline - before).count()));
+				stats.CapWaitMilliseconds = Milliseconds(Clock::now() - before);
+			}
+		}
+		else
+		{
+			capDeadline = Clock::now();
 		}
 
 		const auto start = Clock::now();

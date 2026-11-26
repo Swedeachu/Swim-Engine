@@ -11,13 +11,28 @@
 namespace Swim::Render::Internal
 {
 
-	// A descriptor table kept for the same pass and creation order of the next graph of the
-	// same shape (RenderCommandContext::CreateDescriptorTable).
+	// A descriptor table kept for the next request with the same layout and space, preferably
+	// from the same pass and creation order (RenderCommandContext::CreateDescriptorTable).
 	struct GraphCachedTable
+	{
+		std::uint64_t Key = 0;
+		std::unique_ptr<Rhi::DescriptorTable> Table;
+	};
+
+	struct GraphTableSlot
 	{
 		const Rhi::PipelineLayout* Layout = nullptr;
 		std::uint32_t Space = 0;
-		std::unique_ptr<Rhi::DescriptorTable> Table;
+
+		bool operator==(const GraphTableSlot&) const = default;
+	};
+
+	struct GraphTableSlotHash
+	{
+		std::size_t operator()(const GraphTableSlot& slot) const
+		{
+			return std::hash<const void*>{}(slot.Layout) ^ (std::size_t(slot.Space) * 0x9E3779B97F4A7C15ull);
+		}
 	};
 
 	struct GraphIssuedTable
@@ -88,7 +103,7 @@ namespace Swim::Render::Internal
 		std::vector<GraphBufferRange> Ranges;			// Staged suballocations; Buffer null otherwise.
 		std::vector<Rhi::ReadbackSlice> ReadbackSlices; // Indexed by resource.
 		std::shared_ptr<const GraphShape> PoolShape;	// The shape Pool was allocated for (in allocation order).
-		std::unordered_map<std::uint64_t, GraphCachedTable> Tables;
+		std::unordered_map<GraphTableSlot, std::vector<GraphCachedTable>, GraphTableSlotHash> Tables;
 		std::vector<GraphIssuedTable> IssuedTables; // Created through the context in the current execution.
 		std::shared_ptr<const GraphShape> TablesShape;
 		std::uint64_t TablesLayoutGeneration = UINT64_MAX;

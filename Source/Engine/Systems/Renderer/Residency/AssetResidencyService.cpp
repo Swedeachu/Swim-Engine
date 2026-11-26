@@ -134,6 +134,7 @@ namespace Swim::Render
 		}
 
 		requests.emplace(id, std::move(request));
+		idle = false;
 		return true;
 	}
 
@@ -267,6 +268,7 @@ namespace Swim::Render
 		auto& request = requests.at(handle.GetId());
 		ReleaseRequest(request, lastUse); // May throw for recorded uploads; the request stays.
 		requests.erase(handle.GetId());
+		idle = false; // A freed bindless slot may admit a texture that was rejected for space.
 		return true;
 	}
 
@@ -287,6 +289,8 @@ namespace Swim::Render
 			ReleaseRequest(it->second, lastUse);
 			it = requests.erase(it);
 		}
+
+		idle = false;
 	}
 
 	void AssetResidencyService::Fail(Request& request, AssetErrorCode code, std::string message, bool failCpuAsset)
@@ -315,11 +319,31 @@ namespace Swim::Render
 			{
 				return !job || job.IsComplete();
 			});
+
+		if (idle)
+		{
+			geometry.Collect();
+			textures.Collect();
+			return;
+		}
+
 		PollReads();
 		PollDecodes();
 		StartReads();
 		StageUploads();
 		ObserveUploads();
+		idle = std::none_of(requests.begin(), requests.end(),
+			[&](const auto& entry)
+			{
+				const auto& request = entry.second;
+
+				if (request.State == State::Resident)
+				{
+					return desc.Bindless && request.Kind == Kind::Texture && !request.Bindless && !request.BindlessRejected;
+				}
+
+				return request.State != State::Failed;
+			});
 	}
 
 	void AssetResidencyService::StartReads()

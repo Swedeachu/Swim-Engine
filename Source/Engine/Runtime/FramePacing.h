@@ -77,6 +77,7 @@ namespace Engine
 		Swim::Rhi::PresentMode applied = Swim::Rhi::PresentMode::Auto;
 		FramePacingStats stats;
 		std::chrono::steady_clock::time_point lastStart{};
+		std::chrono::steady_clock::time_point capDeadline{}; // The cap's schedule: one period per frame.
 		std::chrono::steady_clock::time_point inputTime{};
 		bool haveLast = false;
 		std::uint64_t lastSubmitted = 0;

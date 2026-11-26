@@ -211,6 +211,7 @@ SWIM_TEST("Render.GpuVisibility", "EarlyAndLatePhasesShareHistoryAndTheLatePhase
 	Rhi::DescriptorSchemaDesc hzbSchema{ 0, {} };
 	hzbSchema.Bindings.push_back({ HzbBindings::Source, Rhi::DescriptorType::SampledTexture, 1, Rhi::ShaderStageMask::Compute });
 	hzbSchema.Bindings.push_back({ HzbBindings::Destination, Rhi::DescriptorType::StorageTexture, 1, Rhi::ShaderStageMask::Compute });
+	hzbSchema.Bindings.push_back({ HzbBindings::Next, Rhi::DescriptorType::StorageTexture, 1, Rhi::ShaderStageMask::Compute });
 	hzbLayout.program.Interface.DescriptorSchemas = { hzbSchema };
 	Testing::MockComputePipeline hzbPipeline;
 	const HzbBuilder builder({ &hzbPipeline, &hzbLayout, 0, "Test HZB" });
@@ -295,7 +296,7 @@ SWIM_TEST("Render.GpuVisibility", "EarlyAndLatePhasesShareHistoryAndTheLatePhase
 		dispatches += (*world.scene.device.Commands)[i].Kind == "Dispatch";
 	}
 
-	SWIM_CHECK_EQUAL(dispatches, 8u); // Early cull, six HZB mips (40x24 -> 1x1), late cull.
+	SWIM_CHECK_EQUAL(dispatches, 5u); // Early cull, six HZB mips in three pairs (40x24 -> 1x1), late cull.
 	SWIM_CHECK_EQUAL(cullConstants[0][4], std::uint32_t(VisibilityPhase::Early));
 	SWIM_CHECK_EQUAL(cullConstants[0][7], 0u);
 	SWIM_CHECK_EQUAL(cullConstants[1][4], std::uint32_t(VisibilityPhase::Late));

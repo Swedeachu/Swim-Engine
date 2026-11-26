@@ -13,6 +13,17 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::Transition(Rhi::Buffer& buffer, Rhi::ResourceState before, Rhi::ResourceState after)
 	{
 		RequireRecording(true);
+		const auto barrier = MakeBufferBarrier(buffer, before, after);
+		VkDependencyInfo dependency{};
+		dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		dependency.bufferMemoryBarrierCount = 1;
+		dependency.pBufferMemoryBarriers = &barrier;
+		GetState()->Dispatch.vkCmdPipelineBarrier2(commandBuffer, &dependency);
+	}
+
+	VkBufferMemoryBarrier2 VulkanCommandList::MakeBufferBarrier(
+		Rhi::Buffer& buffer, Rhi::ResourceState before, Rhi::ResourceState after) const
+	{
 		// Buffers remain on one family; barriers do not transfer queue ownership.
 		if (poolState->FamilyIndex != GetState()->QueueFamilies.Graphics)
 		{
@@ -44,11 +55,7 @@ namespace Swim::RhiVulkan
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.buffer = FromNativeHandle<VkBuffer>(buffer.GetNativeHandle());
 		barrier.size = VK_WHOLE_SIZE;
-		VkDependencyInfo dependency{};
-		dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		dependency.bufferMemoryBarrierCount = 1;
-		dependency.pBufferMemoryBarriers = &barrier;
-		GetState()->Dispatch.vkCmdPipelineBarrier2(commandBuffer, &dependency);
+		return barrier;
 	}
 
 	void VulkanCommandList::CopyBuffer(Rhi::Buffer& source, Rhi::Buffer& destination, const Rhi::BufferCopyRegion& region)

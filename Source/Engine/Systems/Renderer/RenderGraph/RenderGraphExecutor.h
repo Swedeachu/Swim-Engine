@@ -5,6 +5,8 @@
 #include "Engine/Systems/Renderer/RHI/RhiReadbackArena.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 
+#include <span>
+
 namespace Swim::Render
 {
 
@@ -80,7 +82,7 @@ namespace Swim::Render
 
 		Rhi::RhiObject& GetExport(std::uint64_t graph, std::uint32_t index, GraphKind kind) const;
 
-		void RecordBarrier(const GraphBarrier& barrier);
+		void RecordBarriers(std::span<const GraphBarrier> barriers);
 
 		void RecycleDescriptorTables(const CompiledRenderGraph& graph);
 

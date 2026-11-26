@@ -88,6 +88,15 @@ option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platfor
 option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ${PROJECT_IS_TOP_LEVEL})
 option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)
 option(SWIM_BUILD_SHADER_COMPILER "Build Slang shader compiler/reflection tooling" ON)
+# GPU profilers (Nsight Graphics and similar) map hotspots to .slang lines only when the
+# SPIR-V carries NonSemantic.Shader.DebugInfo with the source embedded. Optimisation stays
+# on. Default from the SWIM_SHADER_DEBUG_INFO environment variable at configure time.
+if(DEFINED ENV{SWIM_SHADER_DEBUG_INFO} AND NOT "$ENV{SWIM_SHADER_DEBUG_INFO}" STREQUAL "0")
+	set(SWIM_SHADER_DEBUG_INFO_DEFAULT ON)
+else()
+	set(SWIM_SHADER_DEBUG_INFO_DEFAULT OFF)
+endif()
+option(SWIM_SHADER_DEBUG_INFO "Compile SPIR-V shaders with source-level debug info for GPU profilers" ${SWIM_SHADER_DEBUG_INFO_DEFAULT})
 option(SWIM_ENABLE_VULKAN_RHI "Compile the modern Vulkan RHI backend" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
 option(SWIM_DEPLOY_ASSETS "Copy the engine Assets/ next to each engine executable after each build (packaged runs); development builds read the repository's Assets/ directly" OFF)

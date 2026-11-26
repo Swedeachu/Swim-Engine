@@ -55,10 +55,12 @@ namespace Swim::Render
 	void RenderGraphExecutor::RecycleDescriptorTables(const CompiledRenderGraph& graph)
 	{
 		// The previous execution has completed (Wait): its tables can be rewritten. Keep them
-		// only for a graph of the same shape while no pipeline layout has been destroyed (a
-		// new layout could reuse a cached one's address).
+		// while no pipeline layout has been destroyed (a new layout could reuse a cached one's
+		// address); a table is only reused for the same layout and space, and passes write
+		// every binding they use, so graphs of different shapes (frames alternating between a
+		// few) share them too.
 		const auto generation = state->Device.GetPipelineLayoutGeneration();
-		const bool keep = generation != UINT64_MAX && graph.shape == state->TablesShape && generation == state->TablesLayoutGeneration;
+		const bool keep = generation != UINT64_MAX && generation == state->TablesLayoutGeneration;
 
 		if (keep)
 		{
@@ -82,10 +84,10 @@ namespace Swim::Render
 				auto& slot = state->Retained[at->second];
 				auto* table = dynamic_cast<Rhi::DescriptorTable*>(slot.get());
 
-				if (table && !state->Tables.contains(issued.Key) && table->ReopenForWrites())
+				if (table && table->ReopenForWrites())
 				{
 					slot.release();
-					state->Tables[issued.Key] = { issued.Layout, issued.Space, std::unique_ptr<Rhi::DescriptorTable>(table) };
+					state->Tables[{ issued.Layout, issued.Space }].push_back({ issued.Key, std::unique_ptr<Rhi::DescriptorTable>(table) });
 				}
 			}
 		}
@@ -101,7 +103,14 @@ namespace Swim::Render
 
 	std::size_t RenderGraphExecutor::GetCachedDescriptorTableCount() const
 	{
-		return state->Tables.size();
+		std::size_t count = 0;
+
+		for (const auto& [slot, free] : state->Tables)
+		{
+			count += free.size();
+		}
+
+		return count;
 	}
 
 	void RenderGraphExecutor::Wait()
@@ -146,19 +155,35 @@ namespace Swim::Render
 		return state->Pool.size();
 	}
 
-	void RenderGraphExecutor::RecordBarrier(const GraphBarrier& barrier)
+	void RenderGraphExecutor::RecordBarriers(std::span<const GraphBarrier> barriers)
 	{
-		const auto& r = state->Graph.definition->Resources[barrier.Resource];
-		auto* resource = state->Resources[barrier.Resource];
+		if (barriers.empty())
+		{
+			return;
+		}
 
-		if (r.Kind == GraphKind::Buffer)
+		// One dependency per pass instead of a barrier command per transition.
+		thread_local std::vector<Rhi::CommandList::BufferBarrier> buffers;
+		thread_local std::vector<Rhi::CommandList::TextureBarrier> textures;
+		buffers.clear();
+		textures.clear();
+
+		for (const auto& barrier : barriers)
 		{
-			state->Commands->Transition(static_cast<Rhi::Buffer&>(*resource), barrier.Before, barrier.After);
+			const auto& r = state->Graph.definition->Resources[barrier.Resource];
+			auto* resource = state->Resources[barrier.Resource];
+
+			if (r.Kind == GraphKind::Buffer)
+			{
+				buffers.push_back({ static_cast<Rhi::Buffer*>(resource), barrier.Before, barrier.After });
+			}
+			else
+			{
+				textures.push_back({ static_cast<Rhi::Texture*>(resource), barrier.Before, barrier.After, barrier.Range });
+			}
 		}
-		else
-		{
-			state->Commands->Transition(static_cast<Rhi::Texture&>(*resource), barrier.Before, barrier.After, barrier.Range);
-		}
+
+		state->Commands->Transitions(buffers, textures);
 	}
 
 	Rhi::TimelinePoint RenderGraphExecutor::Execute(const CompiledRenderGraph& graph, const Rhi::SubmitDesc& synchronization)
@@ -219,18 +244,11 @@ namespace Swim::Render
 		std::size_t pooled = 0;
 		const auto execution = ++state->Executions;
 
-		if (!samePool)
-		{
-			state->Views.clear(); // Before their textures can be dropped below.
-		}
-		else
-		{
-			std::erase_if(state->Views,
-				[&](const auto& entry)
-				{
-					return entry.second.Used + 1 < execution;
-				});
-		}
+		std::erase_if(state->Views,
+			[&](const auto& entry)
+			{
+				return entry.second.Used + 1 < execution;
+			});
 
 		for (auto r : graph.shape->Allocations)
 		{
@@ -270,6 +288,7 @@ namespace Swim::Render
 			else if (desc.Kind == GraphKind::Buffer)
 			{
 				auto creation = desc.Buffer;
+				creation.Size = Internal::PooledBufferSize(creation.Size);
 				creation.DebugName = desc.Name;
 				entry.Object = state->Device.CreateBuffer(creation);
 			}
@@ -291,6 +310,16 @@ namespace Swim::Render
 
 		if (!samePool)
 		{
+			// Views of the allocations dropped below go first (moved ones stay valid).
+			std::erase_if(state->Views,
+				[&](const auto& entry)
+				{
+					return std::any_of(state->Pool.begin(), state->Pool.end(),
+						[&](const auto& old)
+						{
+							return old.Object && old.Object.get() == entry.first.Texture;
+						});
+				});
 			state->Pool = std::move(nextPool); // Drop incompatible old allocations, bounded by the current graph.
 			state->PoolShape = graph.shape;
 		}
@@ -368,10 +397,7 @@ namespace Swim::Render
 
 				const auto barrierStart = Clock::now();
 
-				for (const auto& barrier : scheduled.Barriers)
-				{
-					RecordBarrier(barrier);
-				}
+				RecordBarriers(scheduled.Barriers);
 
 				const auto passStart = Clock::now();
 				lastTimings.Barriers += ms(barrierStart, passStart);
@@ -388,10 +414,7 @@ namespace Swim::Render
 				state->Commands->EndDebugLabel();
 			}
 
-			for (const auto& barrier : graph.shape->FinalBarriers)
-			{
-				RecordBarrier(barrier);
-			}
+			RecordBarriers(graph.shape->FinalBarriers);
 
 			state->Commands->End();
 			lastTimings.Record = ms(mark, Clock::now());

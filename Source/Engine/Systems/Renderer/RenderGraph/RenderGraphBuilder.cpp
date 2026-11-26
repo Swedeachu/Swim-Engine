@@ -17,7 +17,12 @@ namespace Swim::Render
 		}
 
 		range = Internal::NormalizeRange(r, range);
-		const auto cells = Internal::Cells(r, range);
+
+		// Ranges are mip x layer rectangles: two overlap when both intervals do.
+		const auto overlaps = [](std::uint32_t a, std::uint32_t aCount, std::uint32_t b, std::uint32_t bCount)
+		{
+			return a < b + bCount && b < a + aCount;
+		};
 
 		for (const auto& use : pass.Uses)
 		{
@@ -26,12 +31,12 @@ namespace Swim::Render
 				continue;
 			}
 
-			for (auto cell : Internal::Cells(r, use.Range))
+			const auto other = Internal::NormalizeRange(r, use.Range);
+
+			if (overlaps(range.BaseMipLevel, range.MipLevelCount, other.BaseMipLevel, other.MipLevelCount) &&
+				overlaps(range.BaseArrayLayer, range.ArrayLayerCount, other.BaseArrayLayer, other.ArrayLayerCount))
 			{
-				if (std::find(cells.begin(), cells.end(), cell) != cells.end())
-				{
-					throw std::invalid_argument("Overlapping RenderGraph declarations; use one ReadWrite declaration: " + r.Name);
-				}
+				throw std::invalid_argument("Overlapping RenderGraph declarations; use one ReadWrite declaration: " + r.Name);
 			}
 		}
 

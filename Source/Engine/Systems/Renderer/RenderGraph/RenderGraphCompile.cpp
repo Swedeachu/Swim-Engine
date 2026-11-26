@@ -4,9 +4,142 @@
 #include <algorithm>
 #include <numeric>
 #include <queue>
+#include <span>
 
 namespace Swim::Render
 {
+
+	namespace
+	{
+		bool SameTransition(const GraphBarrier& a, const GraphBarrier& b)
+		{
+			return a.Resource == b.Resource && a.Before == b.Before && a.After == b.After;
+		}
+
+		// Per-subresource barriers merged into ranges: mips of a layer, then layers with the same
+		// mip range (a whole texture array becomes one barrier). A resource that takes two
+		// transitions of the same subresource in one list keeps its barriers in order.
+		void CoalesceBarriers(const Internal::GraphDefinition& definition, std::vector<GraphBarrier>& barriers)
+		{
+			if (barriers.size() < 2)
+			{
+				return;
+			}
+
+			std::stable_sort(barriers.begin(), barriers.end(),
+				[](const GraphBarrier& a, const GraphBarrier& b)
+				{
+					return a.Resource < b.Resource;
+				});
+			std::vector<GraphBarrier> result;
+			result.reserve(barriers.size());
+
+			for (std::size_t begin = 0; begin < barriers.size();)
+			{
+				std::size_t end = begin + 1;
+
+				while (end < barriers.size() && barriers[end].Resource == barriers[begin].Resource)
+				{
+					++end;
+				}
+
+				const auto& resource = definition.Resources[barriers[begin].Resource];
+				auto group = std::span(barriers).subspan(begin, end - begin);
+				bool distinct = true;
+
+				if (group.size() > 1)
+				{
+					std::vector<std::uint32_t> cells;
+					cells.reserve(group.size());
+					const auto mips = resource.Kind == GraphKind::Texture ? resource.Texture.MipLevels : 1u;
+
+					for (const auto& barrier : group)
+					{
+						cells.push_back(barrier.Range.BaseArrayLayer * mips + barrier.Range.BaseMipLevel);
+					}
+
+					std::sort(cells.begin(), cells.end());
+					distinct = std::adjacent_find(cells.begin(), cells.end()) == cells.end();
+				}
+
+				if (!distinct || resource.Kind != GraphKind::Texture)
+				{
+					// Buffers have one subresource: identical repeats are dropped.
+					for (const auto& barrier : group)
+					{
+						if (!distinct || result.empty() || !SameTransition(result.back(), barrier) || resource.Kind == GraphKind::Texture)
+						{
+							result.push_back(barrier);
+						}
+					}
+
+					begin = end;
+					continue;
+				}
+
+				std::sort(group.begin(), group.end(),
+					[](const GraphBarrier& a, const GraphBarrier& b)
+					{
+						if (a.Before != b.Before)
+						{
+							return a.Before < b.Before;
+						}
+
+						if (a.After != b.After)
+						{
+							return a.After < b.After;
+						}
+
+						if (a.Range.BaseArrayLayer != b.Range.BaseArrayLayer)
+						{
+							return a.Range.BaseArrayLayer < b.Range.BaseArrayLayer;
+						}
+
+						return a.Range.BaseMipLevel < b.Range.BaseMipLevel;
+					});
+				const std::size_t first = result.size();
+
+				for (const auto& barrier : group)
+				{
+					auto* last = result.size() > first ? &result.back() : nullptr;
+
+					if (last && SameTransition(*last, barrier) && last->Range.BaseArrayLayer == barrier.Range.BaseArrayLayer &&
+						last->Range.ArrayLayerCount == 1 && barrier.Range.ArrayLayerCount == 1 &&
+						last->Range.BaseMipLevel + last->Range.MipLevelCount == barrier.Range.BaseMipLevel)
+					{
+						last->Range.MipLevelCount += barrier.Range.MipLevelCount;
+					}
+					else
+					{
+						result.push_back(barrier);
+					}
+				}
+
+				std::size_t write = first;
+
+				for (std::size_t read = first; read < result.size(); ++read)
+				{
+					auto& last = result[write - (write > first ? 1 : 0)];
+
+					if (write > first && SameTransition(last, result[read]) && last.Range.BaseMipLevel == result[read].Range.BaseMipLevel &&
+						last.Range.MipLevelCount == result[read].Range.MipLevelCount &&
+						last.Range.BaseArrayLayer + last.Range.ArrayLayerCount == result[read].Range.BaseArrayLayer)
+					{
+						last.Range.ArrayLayerCount += result[read].Range.ArrayLayerCount;
+					}
+					else
+					{
+						result[write++] = result[read];
+					}
+				}
+
+				result.resize(write);
+				begin = end;
+			}
+
+			barriers = std::move(result);
+		}
+	} // namespace
 
 	std::shared_ptr<const Internal::GraphShape> Internal::BuildGraphShape(const GraphDefinition& definition)
 	{
@@ -56,37 +189,45 @@ namespace Swim::Render
 					live[p] = true;
 				}
 
-				for (auto cell : Cells(r, use.Range))
-				{
-					auto& hazard = hazards[use.Resource][cell];
-					add(edges[p], hazard.Writer);
-
-					if (use.Access != GraphAccess::Write)
+				// Neighbouring cells usually share a writer: skip repeated lookups.
+				auto lastWriter = unused;
+				ForEachCell(r, use.Range,
+					[&](std::uint32_t cell)
 					{
-						if (hazard.Writer == unused && !r.InitiallyDefined())
+						auto& hazard = hazards[use.Resource][cell];
+
+						if (hazard.Writer != lastWriter)
+						{
+							lastWriter = hazard.Writer;
+							add(edges[p], hazard.Writer);
+
+							if (use.Access != GraphAccess::Write)
+							{
+								add(inputs[p], hazard.Writer);
+							}
+						}
+
+						if (use.Access != GraphAccess::Write && hazard.Writer == unused && !r.InitiallyDefined())
 						{
 							throw std::invalid_argument("RenderGraph read before write: pass '" + pass.Name + "', resource '" + r.Name +
 								"', subresource " + std::to_string(cell));
 						}
 
-						add(inputs[p], hazard.Writer);
-					}
-
-					if (use.Access == GraphAccess::Read)
-					{
-						add(hazard.Readers, p);
-					}
-					else
-					{
-						for (auto reader : hazard.Readers)
+						if (use.Access == GraphAccess::Read)
 						{
-							add(edges[p], reader);
+							add(hazard.Readers, p);
 						}
+						else
+						{
+							for (auto reader : hazard.Readers)
+							{
+								add(edges[p], reader);
+							}
 
-						hazard.Readers.clear();
-						hazard.Writer = p;
-					}
-				}
+							hazard.Readers.clear();
+							hazard.Writer = p;
+						}
+					});
 			}
 		}
 
@@ -307,10 +448,11 @@ namespace Swim::Render
 		{
 			for (const auto& use : definition.Passes[scheduled.Pass].Uses)
 			{
-				for (auto cell : Cells(definition.Resources[use.Resource], use.Range))
-				{
-					transition(use.Resource, cell, use.State, use.Access != GraphAccess::Read, scheduled.Barriers);
-				}
+				ForEachCell(definition.Resources[use.Resource], use.Range,
+					[&](std::uint32_t cell)
+					{
+						transition(use.Resource, cell, use.State, use.Access != GraphAccess::Read, scheduled.Barriers);
+					});
 			}
 		}
 
@@ -336,6 +478,12 @@ namespace Swim::Render
 			}
 		}
 
+		for (auto& scheduled : result.Schedule)
+		{
+			CoalesceBarriers(definition, scheduled.Barriers);
+		}
+
+		CoalesceBarriers(definition, result.FinalBarriers);
 		return shape;
 	}
 
@@ -357,7 +505,7 @@ namespace Swim::Render
 			{
 				// Only pooled buffers are allocated from the shape; staged and imported sizes
 				// (uploads that grow and shrink every frame) would otherwise miss the cache.
-				key.push_back(r.Poolable() ? r.Buffer.Size : 0);
+				key.push_back(r.Poolable() ? Internal::PooledBufferSize(r.Buffer.Size) : 0);
 				key.push_back(u(r.Buffer.Usage) | u(r.Buffer.Memory) << 32 | u(r.Buffer.PersistentMap) << 40);
 			}
 			else
@@ -404,17 +552,31 @@ namespace Swim::Render
 		Internal::AppendGraphShapeKey(definition, key);
 		CompiledRenderGraph result;
 
-		if (cache.shape && key == cache.key)
+		auto& entries = cache.entries;
+		const auto found = std::find_if(entries.rbegin(), entries.rend(),
+			[&](const RenderGraphCompileCache::Entry& entry)
+			{
+				return entry.Key == key;
+			});
+
+		if (found != entries.rend())
 		{
 			++cache.hits;
-			result.shape = cache.shape;
+			result.shape = found->Shape;
+			std::rotate(found.base() - 1, found.base(), entries.end()); // Most recent last.
 		}
 		else
 		{
 			result.shape = Internal::BuildGraphShape(definition);
 			++cache.misses;
-			cache.shape = result.shape;
-			std::swap(cache.key, key);
+
+			if (entries.size() >= RenderGraphCompileCache::Capacity)
+			{
+				entries.erase(entries.begin());
+			}
+
+			entries.push_back({ std::move(key), result.shape });
+			key = {};
 		}
 
 		result.definition = std::make_shared<Internal::GraphDefinition>(std::move(definition));

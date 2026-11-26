@@ -188,6 +188,11 @@ namespace Engine
 		std::vector<TextureHandle> releasedTextures;
 		std::unordered_map<std::uint64_t, std::string> replaced; // Replaced asset id -> its library path.
 		std::uint64_t revision = 0;
+		// CollectPageSlots, rebuilt when the meshes, the extra meshes or the heap change.
+		std::uint64_t meshesVersion = 0;
+		mutable std::uint64_t pageSlotsKey[2] = { UINT64_MAX, UINT64_MAX };
+		mutable std::vector<PageSlot> pageSlots;
+		mutable bool pageSlotsConflict = false;
 		std::uint64_t meshReplacements = 0;
 		std::uint64_t replacements = 0;
 	};

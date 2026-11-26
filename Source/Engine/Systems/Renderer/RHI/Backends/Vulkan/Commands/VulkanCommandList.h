@@ -47,6 +47,8 @@ namespace Swim::RhiVulkan
 
 		void Transition(Rhi::Texture& texture, Rhi::ResourceState before, Rhi::ResourceState after, const Rhi::TextureSubresourceRange& range) override;
 
+		void Transitions(std::span<const BufferBarrier> buffers, std::span<const TextureBarrier> textures) override;
+
 		void CopyBuffer(Rhi::Buffer& source, Rhi::Buffer& destination, const Rhi::BufferCopyRegion& region) override;
 
 		void CopyTexture(Rhi::Texture& source, Rhi::Texture& destination, const Rhi::TextureCopyRegion& region) override;
@@ -133,6 +135,11 @@ namespace Swim::RhiVulkan
 		void RequireComputeQueue() const;
 
 		void RequireImageQueue() const;
+
+		VkImageMemoryBarrier2 MakeImageBarrier(
+			Rhi::Texture& texture, Rhi::ResourceState before, Rhi::ResourceState after, const Rhi::TextureSubresourceRange& range) const;
+
+		VkBufferMemoryBarrier2 MakeBufferBarrier(Rhi::Buffer& buffer, Rhi::ResourceState before, Rhi::ResourceState after) const;
 
 		const VulkanPipelineLayoutState& RequireActivePipeline() const;
 

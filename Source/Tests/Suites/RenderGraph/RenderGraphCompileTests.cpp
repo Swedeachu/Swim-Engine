@@ -437,7 +437,7 @@ SWIM_TEST("RenderGraph.Compile", "DoesNotPoolOverlappingOrIncompatibleResources"
 	auto a = graph.CreateBuffer(BufferDesc());
 	auto b = graph.CreateBuffer(BufferDesc());
 	auto different = BufferDesc();
-	different.Size *= 2;
+	different.Size = 1024; // Another pooled size class.
 	auto c = graph.CreateBuffer(different);
 	graph.AddPass(
 		"write both", Q::Compute,

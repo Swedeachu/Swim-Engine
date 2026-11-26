@@ -107,6 +107,9 @@ namespace Engine
 		bool Particles = true;
 		bool TemporalAntiAliasing = true; // Taa only (false: no anti-aliasing while Taa is chosen).
 		AntiAliasingMode AntiAliasing = AntiAliasingMode::Taa;
+		// FXAA/SMAA smooth only geometric edges (depth steps, normal turns) and keep corners
+		// square, so texture texel edges stay hard; false: every luma edge (classic).
+		bool CrispAntiAliasing = true;
 		float Sharpening = 0.25f;	  // Contrast-adaptive sharpening after anti-aliasing, 0..1 (0 = off); restores what TAA/FXAA soften.
 		bool CinematicEffects = true; // Off: render features with IsCinematic() are skipped.
 		Swim::Render::TemporalSettings Temporal{};

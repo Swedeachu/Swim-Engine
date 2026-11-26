@@ -7,6 +7,10 @@
 //                     the area under the reconstructed silhouette stored signed per pixel;
 //  3 ScreenAaBlend    blends every pixel with the neighbours the weights point at;
 //  4 ScreenSharpen    contrast-adaptive sharpening (after the AMD FidelityFX CAS idea).
+//
+// Crisp (Constants.Crisp, the default): only geometric edges are anti-aliased. FXAA and the
+// edge pass skip luma edges without a depth step or a normal turn behind them (texel edges
+// of pixel-art textures stay hard), and the weights pass does not round real corners.
 #include "Features/FeatureCommon.slang"
 #include "Tweak.slang"
 
@@ -20,7 +24,8 @@ struct ScreenAaConstants
 	float2 InvSize;
 	[Tweak(0.0, 0.5)] float Threshold; // Edge luma threshold (FXAA, edges).
 	[Tweak(0.0, 1.0)] float Strength; // Sharpening strength 0..1.
-	uint2 Reserved;
+	uint Crisp; // 1: geometric edges only, corners kept square.
+	uint Reserved;
 };
 
 [[vk::push_constant]] ConstantBuffer<ScreenAaConstants> Constants;
@@ -36,6 +41,43 @@ int2 ClampPixel(int2 pixel)
 {
 	return clamp(pixel, int2(0, 0), int2(Constants.Size) - 1);
 }
+
+#if SCREEN_AA_PASS <= 1
+[[vk::binding(4, 0)]] Texture2D<float> Depth;	// Scene depth (reverse-Z device depth).
+[[vk::binding(5, 0)]] Texture2D<float4> Normal; // Opaque pixels' shading normal (xyz), 0 elsewhere.
+
+float DepthPixel(int2 pixel)
+{
+	return Depth.Load(int3(ClampPixel(pixel), 0));
+}
+
+// Whether a geometric edge lies between adjacent pixels a and b (b = a + step). Device depth
+// is affine in screen space across a plane, so each side's linear prediction of the other
+// holds on a surface and fails across a silhouette; a crease turns the normal instead.
+bool GeometricEdge(int2 a, int2 step)
+{
+	if (Constants.Crisp == 0u)
+	{
+		return true;
+	}
+
+	const int2 b = a + step;
+	const float da = DepthPixel(a);
+	const float db = DepthPixel(b);
+	const float tolerance = 0.004 * max(da, db) + 1.0e-7;
+	const bool step0 = abs(db - (2.0 * da - DepthPixel(a - step))) > tolerance;
+	const bool step1 = abs(da - (2.0 * db - DepthPixel(b + step))) > tolerance;
+
+	if (step0 && step1)
+	{
+		return true;
+	}
+
+	const float3 na = Normal.Load(int3(ClampPixel(a), 0)).xyz;
+	const float3 nb = Normal.Load(int3(ClampPixel(b), 0)).xyz;
+	return dot(na, na) > 0.25 && dot(nb, nb) > 0.25 && dot(normalize(na), normalize(nb)) < 0.9;
+}
+#endif
 
 #if SCREEN_AA_PASS == 0
 [[vk::binding(0, 0)]] Texture2D<float4> Color;
@@ -72,8 +114,16 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float lumaMax = max(lumaC, max(max(lumaN, lumaS), max(lumaW, lumaE)));
 	const float range = lumaMax - lumaMin;
 
-	// A high floor: texel detail inside block faces and glyph strokes is not an edge.
+	// A high floor: texel detail inside block faces and glyph strokes is not an edge; nor,
+	// when crisp, is any luma edge without geometry behind it.
 	if (range < max(0.0833, lumaMax * Constants.Threshold))
+	{
+		Output[id.xy] = center;
+		return;
+	}
+
+	if (!(GeometricEdge(pixel, int2(0, -1)) || GeometricEdge(pixel, int2(0, 1)) || GeometricEdge(pixel, int2(-1, 0)) ||
+			GeometricEdge(pixel, int2(1, 0))))
 	{
 		Output[id.xy] = center;
 		return;
@@ -206,8 +256,18 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float strongest = max(max(left, top), max(max(right, bottom), max(leftLeft, topTop)));
 	float2 edges = step(Constants.Threshold, float2(left, top));
 	edges *= step(0.5 * strongest, float2(left, top));
-	edges.x = p.x == 0 ? 0.0 : edges.x;
-	edges.y = p.y == 0 ? 0.0 : edges.y;
+
+	// The geometry test (depth and normal loads) only for luma edges.
+	if (edges.x > 0.0 && (p.x == 0 || !GeometricEdge(p, int2(-1, 0))))
+	{
+		edges.x = 0.0;
+	}
+
+	if (edges.y > 0.0 && (p.y == 0 || !GeometricEdge(p, int2(0, -1))))
+	{
+		edges.y = 0.0;
+	}
+
 	Edges[id.xy] = float4(edges, 0.0, 0.0);
 }
 
@@ -241,9 +301,43 @@ float RunArea(int i, int n, float hl, float hr)
 	return Wedge(hl, m, float(i), float(i + 1)) + Wedge(hr, m, float(n - 1 - i), float(n - i));
 }
 
-float Crossing(bool positive, bool negative)
+// Edges of the given axis continuing from pixel along `along` both ways, up to 3.
+int CrossingRun(int2 pixel, int axis, int2 along)
 {
-	return positive == negative ? 0.0 : (positive ? 0.5 : -0.5);
+	int length = 1;
+
+	for (int k = 1; k < 3 && EdgeAt(pixel + along * k, axis); ++k)
+	{
+		++length;
+	}
+
+	for (int k = 1; k < 3 && length < 3 && EdgeAt(pixel - along * k, axis); ++k)
+	{
+		++length;
+	}
+
+	return length;
+}
+
+// The silhouette height where a run ends: +-0.5 toward the crossing edge (positive: at
+// `positive`, negative: at `negative`), 0 without one. When crisp, a crossing edge three or
+// more pixels long is a real corner, not a staircase step, and stays square.
+float Crossing(int2 positive, int2 negative, int axis, int2 along)
+{
+	const bool p = EdgeAt(positive, axis);
+	const bool n = EdgeAt(negative, axis);
+
+	if (p == n)
+	{
+		return 0.0;
+	}
+
+	if (Constants.Crisp != 0u && CrossingRun(p ? positive : negative, axis, along) >= 3)
+	{
+		return 0.0;
+	}
+
+	return p ? 0.5 : -0.5;
 }
 
 [shader("compute")]
@@ -278,8 +372,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		const int2 first = p - int2(left, 0);
 		const int2 last = p + int2(right, 0);
 		// Positive: the crossing edge is in this row (the silhouette dips into it).
-		const float hl = Crossing(EdgeAt(first, 0), EdgeAt(first + int2(0, -1), 0));
-		const float hr = Crossing(EdgeAt(last + int2(1, 0), 0), EdgeAt(last + int2(1, -1), 0));
+		const float hl = Crossing(first, first + int2(0, -1), 0, int2(0, 1));
+		const float hr = Crossing(last + int2(1, 0), last + int2(1, -1), 0, int2(0, 1));
 		area.x = RunArea(left, left + right + 1, hl, hr);
 	}
 
@@ -301,8 +395,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 
 		const int2 first = p - int2(0, up);
 		const int2 last = p + int2(0, down);
-		const float hu = Crossing(EdgeAt(first, 1), EdgeAt(first + int2(-1, 0), 1));
-		const float hd = Crossing(EdgeAt(last + int2(0, 1), 1), EdgeAt(last + int2(-1, 1), 1));
+		const float hu = Crossing(first, first + int2(-1, 0), 1, int2(1, 0));
+		const float hd = Crossing(last + int2(0, 1), last + int2(-1, 1), 1, int2(1, 0));
 		area.y = RunArea(up, up + down + 1, hu, hd);
 	}
 

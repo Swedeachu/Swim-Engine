@@ -13,8 +13,9 @@ namespace Swim::Render
 	{
 		static constexpr std::uint32_t Source = 0;			// Texture2D<float>: the depth, or the previous mip.
 		static constexpr std::uint32_t Destination = 1;		// RWTexture2D<float> (r32f): the mip being written.
+		static constexpr std::uint32_t Next = 2;			// RWTexture2D<float> (r32f): the mip after it, when paired.
 		static constexpr std::uint32_t ThreadGroupSize = 8; // 8x8 threads, one per destination texel.
-		static constexpr std::uint32_t PushConstantBytes = 20;
+		static constexpr std::uint32_t PushConstantBytes = 28;
 	};
 
 	struct HzbBuilderDesc
@@ -27,7 +28,7 @@ namespace Swim::Render
 
 	// Hierarchical depth (item 50): reduces a depth texture into a transient R32Float
 	// mip chain whose texels keep the farthest depth of their footprint, one compute
-	// pass per mip, all graph-scheduled. The depth must be sampleable (D32Float with
+	// pass per pair of mips, all graph-scheduled. The depth must be sampleable (D32Float with
 	// TextureUsage::Sampled, or an R32Float copy). HzbReference is the CPU definition.
 	class HzbBuilder
 	{

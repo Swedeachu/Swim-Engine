@@ -217,7 +217,7 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "HzbReduceProgramMatchesItsCppContrac
 	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Size, B::PushConstantBytes);
 	SWIM_REQUIRE_EQUAL(converted.Interface.DescriptorSchemas.size(), 1u);
 	const auto& bindings = converted.Interface.DescriptorSchemas[0].Bindings;
-	SWIM_REQUIRE_EQUAL(bindings.size(), 2u);
+	SWIM_REQUIRE_EQUAL(bindings.size(), 3u);
 
 	for (const auto& binding : bindings)
 	{
@@ -227,7 +227,7 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "HzbReduceProgramMatchesItsCppContrac
 		}
 		else
 		{
-			SWIM_CHECK_EQUAL(binding.Binding, B::Destination);
+			SWIM_CHECK(binding.Binding == B::Destination || binding.Binding == B::Next);
 			SWIM_CHECK(binding.Type == Rhi::DescriptorType::StorageTexture);
 			SWIM_CHECK(binding.StorageTextureFormat == Rhi::Format::R32Float);
 		}

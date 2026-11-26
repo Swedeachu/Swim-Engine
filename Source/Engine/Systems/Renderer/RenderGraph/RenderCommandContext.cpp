@@ -146,12 +146,27 @@ namespace Swim::Render
 
 		if (desc.VariableDescriptorCount == 0)
 		{
-			const auto found = state.Tables.find(key);
+			// Any table of the same layout will do (passes write the bindings they use), so
+			// passes added or removed earlier in the graph do not cost new tables.
+			const auto found = state.Tables.find({ desc.Layout, desc.Space });
 
-			if (found != state.Tables.end() && found->second.Layout == desc.Layout && found->second.Space == desc.Space)
+			if (found != state.Tables.end() && !found->second.empty())
 			{
-				table = std::move(found->second.Table);
-				state.Tables.erase(found);
+				auto& free = found->second;
+				auto same = std::find_if(free.begin(), free.end(),
+					[&](const auto& cached)
+					{
+						return cached.Key == key;
+					});
+
+				if (same == free.end())
+				{
+					same = free.end() - 1;
+				}
+
+				table = std::move(same->Table);
+				*same = std::move(free.back());
+				free.pop_back();
 			}
 		}
 

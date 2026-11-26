@@ -246,6 +246,7 @@ namespace Swim::Render
 
 	GpuMeshHandle GeometryHeap::CreateMesh(const GeometryMeshDesc& mesh)
 	{
+		++generation;
 		if (!mesh.VertexStride || mesh.Vertices.empty() || mesh.Vertices.size() % mesh.VertexStride != 0 ||
 			mesh.Vertices.size() / mesh.VertexStride > UINT32_MAX)
 		{
@@ -420,6 +421,7 @@ namespace Swim::Render
 
 	bool GeometryHeap::DestroyMesh(GpuMeshHandle mesh, Rhi::TimelinePoint lastUse)
 	{
+		++generation;
 		auto* record = meshes.Get(mesh);
 
 		if (!record)

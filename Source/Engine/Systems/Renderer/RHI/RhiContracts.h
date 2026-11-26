@@ -616,6 +616,36 @@ namespace Swim::Rhi
 		// Dependent storage passes require an explicit barrier even without a state change.
 		virtual void Transition(Texture& texture, ResourceState before, ResourceState after, const TextureSubresourceRange& range = {}) = 0;
 
+		struct BufferBarrier
+		{
+			Buffer* Resource = nullptr;
+			ResourceState Before = ResourceState::Undefined;
+			ResourceState After = ResourceState::Undefined;
+		};
+
+		struct TextureBarrier
+		{
+			Texture* Resource = nullptr;
+			ResourceState Before = ResourceState::Undefined;
+			ResourceState After = ResourceState::Undefined;
+			TextureSubresourceRange Range{};
+		};
+
+		// Several transitions as one dependency (backends may record them as a single barrier
+		// command). Same rules as Transition for each.
+		virtual void Transitions(std::span<const BufferBarrier> buffers, std::span<const TextureBarrier> textures)
+		{
+			for (const auto& barrier : buffers)
+			{
+				Transition(*barrier.Resource, barrier.Before, barrier.After);
+			}
+
+			for (const auto& barrier : textures)
+			{
+				Transition(*barrier.Resource, barrier.Before, barrier.After, barrier.Range);
+			}
+		}
+
 		virtual void CopyBuffer(Buffer& source, Buffer& destination, const BufferCopyRegion& region) = 0;
 
 		virtual void CopyTexture(Texture& source, Texture& destination, const TextureCopyRegion& region) = 0;

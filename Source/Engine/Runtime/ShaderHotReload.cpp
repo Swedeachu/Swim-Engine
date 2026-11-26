@@ -11,12 +11,15 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace Engine
@@ -248,14 +251,22 @@ namespace Engine
 			}
 		}
 
-		static bool Changed(const Program& program)
+		// stamps: this poll's write times, so a file shared by many programs (an include) is
+		// read once per poll.
+		static bool Changed(const Program& program, std::unordered_map<fs::path::string_type, fs::file_time_type>& stamps)
 		{
 			for (std::size_t i = 0; i < program.Files.size(); ++i)
 			{
-				std::error_code error;
-				const auto time = fs::last_write_time(program.Files[i], error);
+				auto [found, added] = stamps.try_emplace(program.Files[i].native());
 
-				if ((error ? fs::file_time_type::min() : time) != program.Times[i])
+				if (added)
+				{
+					std::error_code error;
+					const auto time = fs::last_write_time(program.Files[i], error);
+					found->second = error ? fs::file_time_type::min() : time;
+				}
+
+				if (found->second != program.Times[i])
 				{
 					return true;
 				}
@@ -271,6 +282,18 @@ namespace Engine
 			std::vector<std::string> arguments{ desc.Compiler.string(), program.Source.string(), "-lang", "slang", "-target", "spirv",
 				"-profile", "spirv_1_5", "-matrix-layout-column-major", "-preserve-params", "-fvk-use-entrypoint-name",
 				"-default-image-format-unknown" };
+
+			// Matches the SWIM_SHADER_DEBUG_INFO build option for reloaded programs.
+			static const bool debugInfo = []
+			{
+				const char* value = std::getenv("SWIM_SHADER_DEBUG_INFO");
+				return value != nullptr && std::string_view(value) != "0" && std::string_view(value) != "";
+			}();
+
+			if (debugInfo)
+			{
+				arguments.insert(arguments.end(), { "-g2", "-debug-info-include-source" });
+			}
 
 			if (!program.Entry.empty())
 			{
@@ -366,7 +389,7 @@ namespace Engine
 
 			while (!stop)
 			{
-				wake.wait_for(lock, std::chrono::milliseconds(500),
+				wake.wait_for(lock, std::chrono::seconds(1),
 					[&]
 					{
 						return stop || !requests.empty();
@@ -382,12 +405,13 @@ namespace Engine
 				lock.unlock();
 				const bool all = std::find(asked.begin(), asked.end(), "all") != asked.end();
 				std::vector<Program*> due;
+				std::unordered_map<fs::path::string_type, fs::file_time_type> stamps;
 
 				for (auto& program : programs)
 				{
 					const bool requested = all || std::find(asked.begin(), asked.end(), program.Name) != asked.end();
 
-					if (requested || (watching && Changed(program)))
+					if (requested || (watching && Changed(program, stamps)))
 					{
 						due.push_back(&program);
 					}

@@ -620,6 +620,7 @@ namespace
 			Rhi::DescriptorSchemaDesc schema{ 0, {} };
 			schema.Bindings.push_back({ HzbBindings::Source, Rhi::DescriptorType::SampledTexture, 1, Rhi::ShaderStageMask::Compute });
 			schema.Bindings.push_back({ HzbBindings::Destination, Rhi::DescriptorType::StorageTexture, 1, Rhi::ShaderStageMask::Compute });
+			schema.Bindings.push_back({ HzbBindings::Next, Rhi::DescriptorType::StorageTexture, 1, Rhi::ShaderStageMask::Compute });
 			layout.program.Interface.DescriptorSchemas = { schema };
 		}
 
@@ -666,7 +667,7 @@ namespace
 
 } // namespace
 
-SWIM_TEST("Render.Hzb", "BuilderRecordsOneGraphReductionPerMip")
+SWIM_TEST("Render.Hzb", "BuilderRecordsOneGraphReductionPerMipPair")
 {
 	HzbWorld world;
 	SWIM_CHECK_THROWS(HzbBuilder(HzbBuilderDesc{}), std::invalid_argument);
@@ -677,7 +678,7 @@ SWIM_TEST("Render.Hzb", "BuilderRecordsOneGraphReductionPerMip")
 	SWIM_CHECK_EQUAL(hzb.Width, 13u);
 	SWIM_CHECK_EQUAL(hzb.Height, 9u);
 	SWIM_CHECK_EQUAL(hzb.MipCount, 4u);
-	SWIM_CHECK_EQUAL(hzb.Passes.size(), 4u);
+	SWIM_CHECK_EQUAL(hzb.Passes.size(), 2u);
 	SWIM_CHECK(hzb.Convention == DepthConvention::ReverseZ);
 	const auto& pyramid = graph.GetDesc(hzb.Pyramid);
 	SWIM_CHECK(pyramid.PixelFormat == Rhi::Format::R32Float);
@@ -686,30 +687,31 @@ SWIM_TEST("Render.Hzb", "BuilderRecordsOneGraphReductionPerMip")
 	world.executor->Execute(graph.Compile());
 	world.executor->Wait();
 
-	// One dispatch per mip, 8x8 groups over the destination; constants name both sizes.
+	// One dispatch per pair of mips, 8x8 groups over the first; constants name all three sizes.
 	const auto dispatches = world.Commands("Dispatch");
-	SWIM_REQUIRE_EQUAL(dispatches.size(), 4u);
+	SWIM_REQUIRE_EQUAL(dispatches.size(), 2u);
 	SWIM_CHECK(dispatches[0].SourceOffset == 1 && dispatches[0].DestinationOffset == 1 && dispatches[0].Size == 1);
 	const auto constants = world.Commands("PushConstants");
-	SWIM_REQUIRE_EQUAL(constants.size(), 4u);
-	const std::array<std::array<std::uint32_t, 5>, 4> expected{ { { 13, 9, 7, 5, 0 }, { 7, 5, 4, 3, 0 }, { 4, 3, 2, 2, 0 },
-		{ 2, 2, 1, 1, 0 } } };
+	SWIM_REQUIRE_EQUAL(constants.size(), 2u);
+	const std::array<std::array<std::uint32_t, 7>, 2> expected{ { { 13, 9, 7, 5, 0, 4, 3 }, { 4, 3, 2, 2, 0, 1, 1 } } };
 
-	for (std::size_t mip = 0; mip < 4; ++mip)
+	for (std::size_t pass = 0; pass < 2; ++pass)
 	{
-		std::array<std::uint32_t, 5> values{};
-		SWIM_REQUIRE_EQUAL(constants[mip].Data.size(), sizeof(values));
-		std::memcpy(values.data(), constants[mip].Data.data(), sizeof(values));
-		SWIM_CHECK(values == expected[mip]);
+		std::array<std::uint32_t, 7> values{};
+		SWIM_REQUIRE_EQUAL(constants[pass].Data.size(), sizeof(values));
+		std::memcpy(values.data(), constants[pass].Data.data(), sizeof(values));
+		SWIM_CHECK(values == expected[pass]);
 	}
 
-	// The last pass reads mip 2 and writes mip 3 through single-mip views.
+	// The last pass reads mip 1 and writes mips 2 and 3 through single-mip views.
 	const auto* table = world.device.LastDescriptorTable;
 	SWIM_REQUIRE(table != nullptr);
 	const auto* source = static_cast<const Rhi::TextureView*>(table->Element(HzbBindings::Source, 0));
 	const auto* destination = static_cast<const Rhi::TextureView*>(table->Element(HzbBindings::Destination, 0));
-	SWIM_CHECK_EQUAL(source->GetDesc().BaseMipLevel, 2u);
-	SWIM_CHECK_EQUAL(destination->GetDesc().BaseMipLevel, 3u);
+	const auto* next = static_cast<const Rhi::TextureView*>(table->Element(HzbBindings::Next, 0));
+	SWIM_CHECK_EQUAL(source->GetDesc().BaseMipLevel, 1u);
+	SWIM_CHECK_EQUAL(destination->GetDesc().BaseMipLevel, 2u);
+	SWIM_CHECK_EQUAL(next->GetDesc().BaseMipLevel, 3u);
 	SWIM_CHECK(destination->GetDesc().PixelFormat == Rhi::Format::R32Float);
 
 	// Forward depth keeps the maximum.

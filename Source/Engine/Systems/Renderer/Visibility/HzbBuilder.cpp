@@ -67,14 +67,16 @@ namespace Swim::Render
 
 		const std::uint32_t farthestIsMax = convention == DepthConvention::Forward ? 1u : 0u;
 
-		for (std::uint32_t mip = 0; mip < hzb.MipCount; ++mip)
+		// Mips are reduced in pairs: one dispatch writes mip and mip + 1 (HzbReduce.slang).
+		for (std::uint32_t mip = 0; mip < hzb.MipCount; mip += 2)
 		{
+			const bool paired = mip + 1 < hzb.MipCount;
 			const auto source = mip == 0 ? depth : hzb.Pyramid;
 			const Rhi::TextureSubresourceRange sourceRange{ mip == 0 ? 0u : mip - 1, 1, 0, 1 };
-			const Rhi::TextureSubresourceRange destinationRange{ mip, 1, 0, 1 };
+			const Rhi::TextureSubresourceRange destinationRange{ mip, paired ? 2u : 1u, 0, 1 };
 			const auto sourceExtent = mip == 0 ? HzbExtent{ hzb.Width, hzb.Height } : mips[mip - 1];
-			const std::array<std::uint32_t, 5> constants{ sourceExtent.Width, sourceExtent.Height, mips[mip].Width, mips[mip].Height,
-				farthestIsMax };
+			const std::array<std::uint32_t, 7> constants{ sourceExtent.Width, sourceExtent.Height, mips[mip].Width, mips[mip].Height,
+				farthestIsMax, paired ? mips[mip + 1].Width : 0u, paired ? mips[mip + 1].Height : 0u };
 			Rhi::TextureViewDesc sourceView;
 			sourceView.PixelFormat = mip == 0 ? depthDesc.PixelFormat : Rhi::Format::R32Float;
 			sourceView.BaseMipLevel = sourceRange.BaseMipLevel;
@@ -82,6 +84,8 @@ namespace Swim::Render
 			Rhi::TextureViewDesc destinationView;
 			destinationView.PixelFormat = Rhi::Format::R32Float;
 			destinationView.BaseMipLevel = mip;
+			Rhi::TextureViewDesc nextView = destinationView; // Unpaired: bound but not written.
+			nextView.BaseMipLevel = paired ? mip + 1 : mip;
 			hzb.Passes.push_back(graph.AddPass(
 				name + " mip " + std::to_string(mip), Rhi::QueueType::Compute,
 				[&](RenderGraphBuilder& b)
@@ -106,11 +110,13 @@ namespace Swim::Render
 						throw std::runtime_error(label + " descriptor table could not be created");
 					}
 
-					std::array<Rhi::DescriptorWrite, 2> writes{};
+					std::array<Rhi::DescriptorWrite, 3> writes{};
 					writes[0].Binding = HzbBindings::Source;
 					writes[0].TextureResource = &c.CreateView(source, sourceView);
 					writes[1].Binding = HzbBindings::Destination;
 					writes[1].TextureResource = &c.CreateView(pyramid, destinationView);
+					writes[2].Binding = HzbBindings::Next;
+					writes[2].TextureResource = &c.CreateView(pyramid, nextView);
 					table->Write(writes);
 					auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 					auto& list = c.Commands();

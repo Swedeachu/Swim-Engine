@@ -17,7 +17,7 @@ namespace Swim::Render
 		std::uint32_t Height = 0;
 		std::uint32_t MipCount = 0; // Pyramid mips.
 		DepthConvention Convention = CanonicalDepthConvention;
-		std::vector<GraphPass> Passes; // One reduction pass per mip.
+		std::vector<GraphPass> Passes; // One reduction pass per pair of mips.
 	};
 
 } // namespace Swim::Render
