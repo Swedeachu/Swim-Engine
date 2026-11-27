@@ -49,6 +49,27 @@ namespace Engine
 			return std::isfinite(value) ? value : fallback;
 		}
 
+		// The renderer's description of a scene light at its world transform.
+		Swim::Render::LightDesc MakeLightDesc(const Light& light, const glm::mat4& world)
+		{
+			glm::vec3 forward = -glm::vec3(world[2]);
+			forward = glm::length(forward) > 1e-6f ? glm::normalize(forward) : glm::vec3(0, -1, 0);
+
+			Swim::Render::LightDesc desc;
+			desc.Type = light.Kind == LightKind::Directional
+				? Swim::Render::LightType::Directional
+				: (light.Kind == LightKind::Spot ? Swim::Render::LightType::Spot : Swim::Render::LightType::Point);
+			desc.Position = { world[3].x, world[3].y, world[3].z };
+			desc.Direction = { forward.x, forward.y, forward.z };
+			desc.Color = { std::max(Finite(light.Color.r, 1), 0.0f), std::max(Finite(light.Color.g, 1), 0.0f),
+				std::max(Finite(light.Color.b, 1), 0.0f) };
+			desc.Intensity = std::max(Finite(light.Intensity, 0), 0.0f);
+			desc.Range = std::max(Finite(light.Range, 10), 0.01f);
+			desc.OuterConeAngle = std::clamp(Finite(light.OuterCone, 0.6f), 0.01f, 1.5707f);
+			desc.InnerConeAngle = std::clamp(Finite(light.InnerCone, 0.3f), 0.0f, desc.OuterConeAngle * 0.999f);
+			return desc;
+		}
+
 	} // namespace
 
 	SceneRenderBridge::SceneRenderBridge(FrameRenderer& rendererValue) : renderer(rendererValue)
@@ -371,20 +392,7 @@ namespace Engine
 
 			const auto& transform = view.get<Transform>(entity);
 			const glm::mat4& world = transform.GetWorldMatrix(registry);
-			glm::vec3 forward = -glm::vec3(world[2]);
-			forward = glm::length(forward) > 1e-6f ? glm::normalize(forward) : glm::vec3(0, -1, 0);
-
-			LightDesc desc;
-			desc.Type = light.Kind == LightKind::Directional ? LightType::Directional
-															 : (light.Kind == LightKind::Spot ? LightType::Spot : LightType::Point);
-			desc.Position = { world[3].x, world[3].y, world[3].z };
-			desc.Direction = { forward.x, forward.y, forward.z };
-			desc.Color = { std::max(Finite(light.Color.r, 1), 0.0f), std::max(Finite(light.Color.g, 1), 0.0f),
-				std::max(Finite(light.Color.b, 1), 0.0f) };
-			desc.Intensity = std::max(Finite(light.Intensity, 0), 0.0f);
-			desc.Range = std::max(Finite(light.Range, 10), 0.01f);
-			desc.OuterConeAngle = std::clamp(Finite(light.OuterCone, 0.6f), 0.01f, 1.5707f);
-			desc.InnerConeAngle = std::clamp(Finite(light.InnerCone, 0.3f), 0.0f, desc.OuterConeAngle * 0.999f);
+			LightDesc desc = MakeLightDesc(light, world);
 
 			auto [it, inserted] = lights.try_emplace(entity);
 			LightState& state = it->second;

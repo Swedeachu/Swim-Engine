@@ -67,12 +67,12 @@ namespace Engine
 	{
 		const auto& view = context.View();
 
-		if (graph == &context.Graph() && frame == view.Frame)
+		if (graph == context.Graph().GetId() && frame == view.Frame)
 		{
 			return maps;
 		}
 
-		graph = &context.Graph();
+		graph = context.Graph().GetId();
 		frame = view.Frame;
 		maps = {};
 		auto* device = context.Device();
@@ -135,6 +135,13 @@ namespace Engine
 			cascades = count;
 		}
 
+		context.Graph().OnAbandoned(
+			[this, w = written, l = latest, v = historyValid]
+			{
+				written = w;
+				latest = l;
+				historyValid = v;
+			});
 		const float dt = Settings.Paused ? 0.0f : view.DeltaTime * std::max(Settings.TimeScale, 0.0f);
 		time = std::fmod(time + dt, RepeatSeconds);
 		currentTime.store(time, std::memory_order_relaxed);

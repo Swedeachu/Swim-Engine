@@ -12,7 +12,6 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		RequireGraphicsQueue();
 		auto& native = RequireResource<VulkanGraphicsPipeline>(pipeline, GetState());
-		boundTables.assign(native.GetLayoutState()->Sets.size(), nullptr);
 		GetState()->Dispatch.vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			FromNativeHandle<VkPipeline>(native.GetNativeHandle()));
 		graphicsPipeline = &native;

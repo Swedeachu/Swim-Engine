@@ -295,6 +295,11 @@ namespace Swim::Render
 			}
 
 			initialized = true;
+			graph.OnAbandoned(
+				[this]
+				{
+					initialized = false;
+				});
 		}
 
 		return atlases;

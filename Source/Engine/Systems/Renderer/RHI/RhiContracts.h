@@ -158,12 +158,48 @@ namespace Swim::Rhi
 		ShaderStageMask Stages = ShaderStageMask::None;
 	};
 
+	// Register classes of backends whose shaders bind by register instead of (space, binding).
+	enum class NativeRegisterClass : std::uint8_t
+	{
+		ConstantBuffer,
+		ShaderResource,
+		UnorderedAccess,
+		Sampler,
+	};
+
+	// Where such a backend's bytecode expects one reflected (Space, Binding), found by matching
+	// parameter names between the two targets' reflection. The push-constant block uses
+	// PushConstantSpace. Without an entry a binding uses Register = Binding, RegisterSpace = Space.
+	struct NativeBinding
+	{
+		static constexpr std::uint32_t PushConstantSpace = 0xffffffffu;
+
+		std::uint32_t Space = 0;
+		std::uint32_t Binding = 0;
+		NativeRegisterClass Class = NativeRegisterClass::ShaderResource;
+		std::uint32_t Register = 0;
+		std::uint32_t RegisterSpace = 0;
+		std::uint32_t StructureStride = 0; // Structured buffers; zero for raw buffers.
+		bool SizeQueried = false;		   // The shaders read the buffer's element count.
+	};
+
+	// The input-signature semantic such a backend's vertex stage reads a vertex attribute
+	// Location from.
+	struct NativeVertexInput
+	{
+		std::uint32_t Location = 0;
+		std::string SemanticName;
+		std::uint32_t SemanticIndex = 0;
+	};
+
 	struct ShaderProgramInterfaceDesc
 	{
 		std::span<const DescriptorSchemaDesc> DescriptorSchemas;
 		std::span<const PushConstantRange> PushConstants;
 		// Fixed local size from the sole compute entry point; zero for graphics.
 		std::array<std::uint32_t, 3> ComputeThreadGroupSize{};
+		std::span<const NativeBinding> NativeBindings;
+		std::span<const NativeVertexInput> NativeVertexInputs;
 	};
 
 	struct ShaderProgramInterface
@@ -172,6 +208,8 @@ namespace Swim::Rhi
 		std::vector<PushConstantRange> PushConstants;
 		// Fixed local size from the sole compute entry point; zero for graphics.
 		std::array<std::uint32_t, 3> ComputeThreadGroupSize{};
+		std::vector<NativeBinding> NativeBindings;
+		std::vector<NativeVertexInput> NativeVertexInputs;
 	};
 
 	struct ShaderProgramDesc
@@ -220,6 +258,9 @@ namespace Swim::Rhi
 		// spans; locations and numeric types must match the vertex shader.
 		std::span<const VertexBindingDesc> VertexBindings;
 		std::span<const VertexAttributeDesc> VertexAttributes;
+		// Multisampled pipelines: colour target 0's alpha also masks the samples written
+		// (alpha to coverage). Ignored with one sample.
+		bool AlphaToCoverage = false;
 	};
 
 	// One compute entry point. An empty EntryPoint selects the program entry; otherwise it must match.
@@ -375,7 +416,7 @@ namespace Swim::Rhi
 		QueryType Type = QueryType::Timestamp;
 		std::uint32_t Count = 0;
 		std::string_view DebugName;
-		QueueType Queue = QueueType::Graphics; // Pool is restricted to this queue family.
+		QueueType Queue = QueueType::Graphics; // Pool is restricted to this queue type.
 	};
 
 	struct AdapterInfo
@@ -395,6 +436,7 @@ namespace Swim::Rhi
 		std::array<std::uint8_t, 8> Luid{};
 		bool LuidValid = false;
 		GraphicsCapabilities Capabilities{};
+		GraphicsApi Api = GraphicsApi::Null; // The backend that reports this adapter.
 	};
 
 	// Callers retain recorded resources until GPU completion, using frame retirement when needed.
@@ -535,8 +577,9 @@ namespace Swim::Rhi
 		// for SampleCmp; reflection does not distinguish sampler comparison types or pairings.
 		// Integer texel loads need no sampler; this API does not validate shader/sampler pairings.
 		// StorageTexture writes require an exact StorageTextureFormat match and a
-		// single-sampled 2D view of one mip/layer. Images must be in General layout
-		// at dispatch; writing a descriptor does not transition or initialize its image.
+		// single-sampled 2D view of one mip/layer. Images must be in the storage state
+		// (ShaderRead | ShaderWrite) at dispatch; writing a descriptor does not transition or
+		// initialize its image.
 		virtual void Write(std::span<const DescriptorWrite> writes) = 0;
 
 		// Once the GPU has finished every use of this table: makes all its bindings writable
@@ -612,7 +655,7 @@ namespace Swim::Rhi
 		virtual void Transition(Buffer& buffer, ResourceState before, ResourceState after) = 0;
 
 		// Texture ShaderRead selects sampled access; ShaderRead | ShaderWrite selects
-		// storage-image access in General layout, including storage-only reads.
+		// storage-image access, including storage-only reads.
 		// Dependent storage passes require an explicit barrier even without a state change.
 		virtual void Transition(Texture& texture, ResourceState before, ResourceState after, const TextureSubresourceRange& range = {}) = 0;
 
@@ -655,10 +698,10 @@ namespace Swim::Rhi
 		virtual void CopyTextureToBuffer(Texture& source, Buffer& destination, const BufferTextureCopyRegion& region) = 0;
 
 		// Transitions/copies are outside rendering. Resources remain alive until
-		// submission completion. Transitions do not transfer queue-family ownership.
+		// submission completion. Transitions do not move resources between queue types.
 		// Color-image transfers and buffer/image barriers support graphics and compute
-		// families. Compute barriers exclude attachment/present/vertex/index states.
-		// Transfer-only families support CopyBuffer. Keep each resource on one family.
+		// queues. Compute barriers exclude attachment/present/vertex/index states.
+		// Transfer queues support CopyBuffer. Keep each resource on one queue type.
 		virtual void BeginRendering(const RenderingDesc& desc) = 0;
 
 		virtual void EndRendering() = 0;

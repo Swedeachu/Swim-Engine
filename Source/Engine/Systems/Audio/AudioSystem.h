@@ -294,6 +294,7 @@ namespace Engine
 		AudioOutput GetOutput() const;
 
 	  private:
+		void RegisterCommands(Swim::Commands::CommandRegistry& commands);
 
 		struct Impl;
 		std::unique_ptr<Impl> impl;

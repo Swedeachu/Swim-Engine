@@ -127,9 +127,9 @@ namespace Swim::Render
 		resources.FrameIndex = frameIndex;
 		resources.JitterPixels = Temporal::JitterPixels(frameIndex, frame.Settings.JitterPhases);
 		const std::uint32_t target = historyValid ? 1u - latest : latest;
-		const bool reuseImport = historyValid && importedGraph == &graph;
+		const bool reuseImport = historyValid && importedGraph == graph.GetId();
 		resources.History = historyValid ? (reuseImport ? importedHistory : graph.ImportTexture(*history[latest], S::ShaderRead)) : frame.Color;
-		importedGraph = nullptr;
+		importedGraph = 0;
 		// Write defines every texel: an undefined import is enough, exported for the next frame.
 		resources.Output = graph.ImportTexture(*history[target], written[target] ? S::ShaderRead : S::Undefined);
 		graph.Export(resources.Output, S::ShaderRead);
@@ -213,6 +213,14 @@ namespace Swim::Render
 				list.Dispatch((constants.Width + groups - 1) / groups, (constants.Height + groups - 1) / groups, 1);
 			});
 
+		graph.OnAbandoned(
+			[this, w = written, l = latest, v = historyValid, f = frameIndex]
+			{
+				written = w;
+				latest = l;
+				historyValid = v;
+				frameIndex = f;
+			});
 		written[target] = true;
 		latest = target;
 		historyValid = true;
@@ -227,10 +235,10 @@ namespace Swim::Render
 			return std::nullopt;
 		}
 
-		if (importedGraph != &graph)
+		if (importedGraph != graph.GetId())
 		{
 			importedHistory = graph.ImportTexture(*history[latest], Rhi::ResourceState::ShaderRead);
-			importedGraph = &graph;
+			importedGraph = graph.GetId();
 		}
 
 		return importedHistory;

@@ -3,6 +3,8 @@
 // short ones flatten with distance, fine normal detail turns into roughness, reflection steps
 // step down, and past the grid a flat far-field ring keeps the water shaded to the horizon.
 // Grid: offset(u) = sign(u) * scale * (exp(rate * |u|) - 1) for u in -1..1 (as OceanSurface).
+#include "Resources/DrawIndex.slang"
+#include "Resources/RowRecord.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 #include "Water/WaterShading.slang"
 #include "Water/WaterWaves.slang"
@@ -21,7 +23,7 @@ struct WaveWaterParams
 	DistanceFog Fog; // Self-applied fog (off with the scene fog).
 };
 
-[[vk::binding(0, 2)]] StructuredBuffer<WaveWaterParams> Params;
+[[vk::binding(0, 2)]] StructuredBuffer<RowRecord<29>> Params; // One WaveWaterParams, read with LoadRowRecord.
 [[vk::binding(1, 2)]] Texture2D<float4> SceneColor;
 [[vk::binding(2, 2)]] Texture2D<float> SceneDepth;
 [[vk::binding(3, 2)]] SamplerState SceneSampler;
@@ -52,9 +54,10 @@ float WaveEdgeFade(WaveWaterParams p, float2 rest)
 }
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
-	const WaveWaterParams p = Params[0];
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const WaveWaterParams p = LoadRowRecord<WaveWaterParams>(Params, 0);
 	const ForwardView view = Views[0];
 	const uint quads = uint(p.GridShape.x);
 	const uint gridVertices = quads * quads * 6u;
@@ -137,7 +140,7 @@ float2 WaveRippleSlope(float2 p, float time, float footprint)
 [shader("fragment")]
 ForwardTransparentTargets fragmentMain(VertexOutput input)
 {
-	const WaveWaterParams p = Params[0];
+	const WaveWaterParams p = LoadRowRecord<WaveWaterParams>(Params, 0);
 	const ForwardView view = Views[0];
 	const float3 toCamera = view.CameraPosition - input.WorldPosition;
 	const float distance = length(toCamera);

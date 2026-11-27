@@ -15,12 +15,15 @@ namespace Swim::Render
 	// state its usage permits. Usage is a subset of TransferSource, Vertex, Index,
 	// Uniform, Storage and Indirect; alignment is a power of two applied to the
 	// GPU offset (the executor additionally applies uniform/storage limits).
+	// ElementStride, when nonzero, also makes the offset a multiple of the element
+	// size: some back ends address structured-buffer views in whole elements.
 	struct GraphUploadDesc
 	{
 		std::uint64_t Size = 0;
 		Rhi::BufferUsage Usage = Rhi::BufferUsage::TransferSource;
 		std::uint64_t Alignment = 4;
 		std::string_view DebugName;
+		std::uint64_t ElementStride = 0;
 	};
 
 	// A GPU-written, host-read buffer suballocated from the executor's readback

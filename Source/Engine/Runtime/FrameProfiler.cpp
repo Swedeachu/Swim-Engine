@@ -54,7 +54,8 @@ namespace Engine
 
 	void FrameProfiler::Add(std::string_view category, std::string_view name, double milliseconds)
 	{
-		if (!std::isfinite(milliseconds))
+		// Only a measured capture frame keeps zones; otherwise skip the key build and hash.
+		if (!capturing || warmupLeft > 0 || !std::isfinite(milliseconds))
 		{
 			return;
 		}

@@ -103,6 +103,10 @@ namespace Engine
 		toggles.push_back(Budget("shadows.point", "Point light cube shadows", s.Shadow.MaxPointShadows, saved.PointShadows));
 		toggles.push_back(Flag("shadows.cascade-cache", "Reuse far sun cascades between frames (off: every cascade every frame)",
 			s.ShadowCascadeCache));
+		toggles.push_back(Flag("shadows.static-layer",
+			"Keep static casters in their own cached atlas (off: redraw them with every cascade)", s.ShadowStaticLayer));
+		toggles.push_back(Flag("shadows.dynamic-every-frame", "With the static layer: redraw every cascade's moving casters every frame",
+			s.ShadowDynamicEveryFrame));
 		toggles.push_back(Flag("forward.transparent", "The transparent sort and pass", s.Transparent));
 		toggles.push_back(Flag("lighting.deferred-local-lights", "Local lights in a compute pass (off: in the Forward+ fragment stage)",
 			s.DeferredLocalLights));

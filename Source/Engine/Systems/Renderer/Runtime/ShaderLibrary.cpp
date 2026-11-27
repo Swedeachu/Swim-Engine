@@ -2,6 +2,7 @@
 
 #include "Tools/ShaderCompiler/ShaderReflection.h"
 #include "Engine/RuntimeShaderCatalog.h"
+#include "Tools/ShaderCompiler/ShaderNativeBindings.h"
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
 #include "Tools/ShaderCompiler/ShaderTweaks.h"
 
@@ -56,7 +57,8 @@ namespace Engine
 	};
 
 	ShaderLibrary::ShaderLibrary(Swim::Rhi::Device& deviceValue, std::filesystem::path rootValue)
-		: device(deviceValue), root(std::move(rootValue))
+		: device(deviceValue), root(std::move(rootValue)),
+		  bytecodeExtension(Swim::Rhi::ShaderBytecodeExtension(deviceValue.GetAdapterInfo().Api))
 	{
 		if (root.empty() || !std::filesystem::is_directory(root))
 		{
@@ -66,7 +68,7 @@ namespace Engine
 		for (const auto name : Internal::RuntimeProgramNames)
 		{
 			const std::string key(name);
-			Register({ key, key + ".spv", key + ".reflection.json" });
+			Register({ key, key + bytecodeExtension, key + ".reflection.json" });
 		}
 	}
 
@@ -138,7 +140,7 @@ namespace Engine
 		}
 
 		std::error_code error;
-		RuntimeShaderDesc desc{ key, root / (key + ".spv"), root / (key + ".reflection.json") };
+		RuntimeShaderDesc desc{ key, root / (key + bytecodeExtension), root / (key + ".reflection.json") };
 
 		if (!std::filesystem::is_regular_file(desc.Bytecode, error) || !std::filesystem::is_regular_file(desc.Reflection, error))
 		{
@@ -177,10 +179,10 @@ namespace Engine
 			throw std::runtime_error("ShaderLibrary: unregistered program " + key);
 		}
 
-		const auto& spirv = desc->Bytecode;
+		const auto& bytecode = desc->Bytecode;
 		const auto& reflectionPath = desc->Reflection;
 		Loaded loaded;
-		loaded.Bytes = ReadBytes(spirv);
+		loaded.Bytes = ReadBytes(bytecode);
 		std::ifstream reflectionFile(reflectionPath, std::ios::binary);
 
 		if (!reflectionFile)
@@ -206,6 +208,42 @@ namespace Engine
 		}
 
 		loaded.Interface = std::move(converted.Interface);
+
+		// DXIL binds by register: <Name>.dxil.reflection.json places each reflected binding.
+		if (bytecode.extension() == ".dxil")
+		{
+			auto nativePath = bytecode;
+			nativePath += ".reflection.json";
+			const auto registers = Swim::ShaderCompiler::LoadSlangReflectionJson(nativePath);
+
+			if (!registers)
+			{
+				throw std::runtime_error("ShaderLibrary: " + std::string(name) + " register reflection: " + registers.Error);
+			}
+
+			auto natives = Swim::ShaderCompiler::BuildNativeBindings(reflection.Reflection, registers.Reflection);
+
+			if (!natives)
+			{
+				throw std::runtime_error("ShaderLibrary: " + std::string(name) + " registers: " + natives.Error);
+			}
+
+			if (const auto error = Swim::ShaderCompiler::LoadNativeSizeQueries(nativePath, natives.Bindings); !error.empty())
+			{
+				throw std::runtime_error("ShaderLibrary: " + std::string(name) + " size queries: " + error);
+			}
+
+			loaded.Interface.NativeBindings = std::move(natives.Bindings);
+			auto inputs = Swim::ShaderCompiler::LoadNativeVertexInputs(nativePath);
+
+			if (!inputs)
+			{
+				throw std::runtime_error("ShaderLibrary: " + std::string(name) + " vertex inputs: " + inputs.Error);
+			}
+
+			loaded.Interface.NativeVertexInputs = std::move(inputs.Inputs);
+		}
+
 		// Name every descriptor the interface declares (global and entry-point parameters).
 		const auto nameBinding = [&](const Swim::ShaderCompiler::ShaderBindingReflection& parameter)
 		{
@@ -266,7 +304,9 @@ namespace Engine
 			loaded.Bytes };
 		RuntimeComputeProgram program;
 		program.Program = device.CreateShaderProgram({ { &stage, 1 },
-			{ loaded.Interface.DescriptorSchemas, loaded.Interface.PushConstants, loaded.Interface.ComputeThreadGroupSize }, label });
+			{ loaded.Interface.DescriptorSchemas, loaded.Interface.PushConstants, loaded.Interface.ComputeThreadGroupSize,
+				loaded.Interface.NativeBindings },
+			label });
 
 		if (!program.Program)
 		{
@@ -304,8 +344,10 @@ namespace Engine
 				{ Swim::Rhi::ShaderStageMask::Fragment, Describe(name)->FragmentEntry, loaded.Bytes } }
 		};
 		RuntimeGraphicsProgram program;
-		program.Program =
-			device.CreateShaderProgram({ stages, { loaded.Interface.DescriptorSchemas, loaded.Interface.PushConstants }, label });
+		program.Program = device.CreateShaderProgram({ stages,
+			{ loaded.Interface.DescriptorSchemas, loaded.Interface.PushConstants, {}, loaded.Interface.NativeBindings,
+				loaded.Interface.NativeVertexInputs },
+			label });
 
 		if (!program.Program)
 		{
@@ -329,7 +371,7 @@ namespace Engine
 		std::error_code error;
 		const auto holds = [&](const std::filesystem::path& directory)
 		{
-			return !directory.empty() && std::filesystem::is_regular_file(directory / "ForwardOpaque.spv", error);
+			return !directory.empty() && std::filesystem::is_regular_file(directory / "ForwardOpaque.reflection.json", error);
 		};
 
 		if (const char* overridden = std::getenv("SWIM_SHADER_DIR"); overridden && *overridden)

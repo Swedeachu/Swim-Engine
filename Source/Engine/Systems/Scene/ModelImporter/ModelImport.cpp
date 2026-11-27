@@ -199,6 +199,137 @@ namespace Engine
 			bool HasTangents = true;
 		};
 
+		// One cooked vertex in world space (hasTangent is cleared when its tangent is degenerate).
+		Swim::Render::StandardVertex TransformVertex(const std::byte* vertex, const VertexLayout& layout, const glm::mat4& nodeWorld,
+			const glm::mat3& normalMatrix, bool mirrored, bool& hasTangent)
+		{
+			const auto position = ReadFloats<3>(vertex, layout.Position, { 0, 0, 0 });
+			const auto normal = ReadFloats<3>(vertex, layout.Normal, { 0, 1, 0 });
+			const auto tangent = ReadFloats<4>(vertex, layout.Tangent, { 0, 0, 0, 1 });
+			const auto uv = ReadFloats<2>(vertex, layout.TexCoord, { 0, 0 });
+
+			const glm::vec3 p3 = glm::vec3(nodeWorld * glm::vec4(position[0], position[1], position[2], 1.0f));
+			glm::vec3 n3 = normalMatrix * glm::vec3(normal[0], normal[1], normal[2]);
+			n3 = glm::dot(n3, n3) > 1e-20f ? glm::normalize(n3) : glm::vec3(0, 1, 0);
+			glm::vec3 t3 = glm::mat3(nodeWorld) * glm::vec3(tangent[0], tangent[1], tangent[2]);
+
+			if (glm::dot(t3, t3) > 1e-20f)
+			{
+				t3 = glm::normalize(t3);
+			}
+			else
+			{
+				hasTangent = false;
+			}
+
+			Swim::Render::StandardVertex v;
+			v.Position = { p3.x, p3.y, p3.z };
+			v.Normal = { n3.x, n3.y, n3.z };
+			v.Tangent = { t3.x, t3.y, t3.z, (tangent[3] < 0.0f) != mirrored ? -1.0f : 1.0f };
+			v.TexCoord0 = uv;
+			return v;
+		}
+
+		// One primitive of a node's mesh, in model space, appended to its material group: its
+		// vertices deduplicated, triangles with an out-of-range index dropped.
+		void AppendPrimitive(Group& group, const Assets::MeshAsset& mesh, const VertexLayout& layout,
+			const Assets::MeshPrimitive& primitive, std::size_t vertexCount, const glm::mat4& nodeWorld, glm::vec3& boundsMin,
+			glm::vec3& boundsMax)
+		{
+			const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeWorld)));
+			const bool mirrored = glm::determinant(glm::mat3(nodeWorld)) < 0.0f;
+			const auto& stream = mesh.VertexStreams.front();
+			auto& out = group.Mesh;
+			std::unordered_map<std::uint32_t, std::uint32_t> remap;
+			remap.reserve(primitive.IndexCount);
+			std::vector<std::uint32_t> triangle;
+			triangle.reserve(3);
+
+			for (std::uint32_t i = 0; i < primitive.IndexCount; ++i)
+			{
+				const std::int64_t source = static_cast<std::int64_t>(ReadIndex(mesh, primitive.FirstIndex + i)) + primitive.VertexOffset;
+
+				if (source < 0 || static_cast<std::size_t>(source) >= vertexCount)
+				{
+					triangle.clear();
+					i += 2 - (i % 3); // Skip the rest of this triangle.
+					continue;
+				}
+
+				const auto vertexIndex = static_cast<std::uint32_t>(source);
+				auto found = remap.find(vertexIndex);
+
+				if (found == remap.end())
+				{
+					const std::byte* vertex = mesh.VertexBytes.data() + stream.DataOffsetBytes + std::size_t(vertexIndex) * layout.Stride;
+					bool hasTangent = true;
+					const auto v = TransformVertex(vertex, layout, nodeWorld, normalMatrix, mirrored, hasTangent);
+					group.HasTangents = group.HasTangents && hasTangent;
+					boundsMin = glm::min(boundsMin, glm::vec3(v.Position[0], v.Position[1], v.Position[2]));
+					boundsMax = glm::max(boundsMax, glm::vec3(v.Position[0], v.Position[1], v.Position[2]));
+					out.Vertices.push_back(v);
+					found = remap.emplace(vertexIndex, static_cast<std::uint32_t>(out.Vertices.size() - 1)).first;
+				}
+
+				triangle.push_back(found->second);
+
+				if (triangle.size() == 3)
+				{
+					if (mirrored)
+					{
+						std::swap(triangle[1], triangle[2]);
+					}
+
+					out.Indices.insert(out.Indices.end(), triangle.begin(), triangle.end());
+					triangle.clear();
+				}
+			}
+		}
+
+		// A cooked material instance's factors, blend mode and textures, over the given defaults.
+		void ReadCookedMaterial(
+			const Assets::AssetSystem& assets, const Assets::MaterialInstanceAsset& material, Engine::MaterialDesc& desc)
+		{
+			if (const auto* p = FindParameter(material, "BaseColorFactor"))
+			{
+				desc.BaseColor = p->Value;
+			}
+
+			if (const auto* p = FindParameter(material, "EmissiveFactor"))
+			{
+				desc.Emissive = { p->Value[0], p->Value[1], p->Value[2] };
+			}
+
+			if (const auto* p = FindParameter(material, "MetallicFactor"))
+			{
+				desc.Metallic = p->Value[0];
+			}
+
+			if (const auto* p = FindParameter(material, "RoughnessFactor"))
+			{
+				desc.Roughness = p->Value[0];
+			}
+
+			if (const auto* p = FindParameter(material, "AlphaCutoff"))
+			{
+				desc.AlphaCutoff = p->Value[0];
+			}
+
+			if (const auto* materialTemplate = material.Template.IsValid() ? assets.Resolve(material.Template) : nullptr)
+			{
+				desc.DoubleSided = (materialTemplate->FeatureMask & FeatureDoubleSided) != 0;
+				desc.Blend = (materialTemplate->FeatureMask & FeatureAlphaBlend) != 0 ? Engine::MaterialBlend::Transparent
+					: (materialTemplate->FeatureMask & FeatureAlphaMask) != 0		  ? Engine::MaterialBlend::Masked
+																					  : Engine::MaterialBlend::Opaque;
+			}
+
+			desc.BaseColorTexture = FindTexture(material, "BaseColorTexture");
+			desc.MetallicRoughnessTexture = FindTexture(material, "MetallicRoughnessTexture");
+			desc.NormalTexture = FindTexture(material, "NormalTexture");
+			desc.OcclusionTexture = FindTexture(material, "OcclusionTexture");
+			desc.EmissiveTexture = FindTexture(material, "EmissiveTexture");
+		}
+
 	} // namespace
 
 	Assets::AssetHandle<Assets::ModelAsset> FindCookedModel(const Assets::AssetSystem& assets, const std::vector<std::string>& keywords,
@@ -322,10 +453,7 @@ namespace Engine
 			}
 
 			const glm::mat4 nodeWorld = worldOf(nodeIndex, worldOf);
-			const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeWorld)));
-			const bool mirrored = glm::determinant(glm::mat3(nodeWorld)) < 0.0f;
-			const auto& stream = mesh->VertexStreams.front();
-			const std::size_t vertexCount = static_cast<std::size_t>(stream.DataSizeBytes / layout->Stride);
+			const std::size_t vertexCount = static_cast<std::size_t>(mesh->VertexStreams.front().DataSizeBytes / layout->Stride);
 			const std::size_t indexSize = mesh->IndexFormat == Assets::IndexElementFormat::UInt16 ? 2 : 4;
 			const std::size_t indexCount = mesh->IndexBytes.size() / indexSize;
 
@@ -358,76 +486,7 @@ namespace Engine
 				const std::uint64_t key = material.IsValid() ? material.GetId().Value : 0;
 				auto& group = groups[key];
 				group.Material = material;
-				auto& out = group.Mesh;
-
-				std::unordered_map<std::uint32_t, std::uint32_t> remap;
-				remap.reserve(primitive.IndexCount);
-				std::vector<std::uint32_t> triangle;
-				triangle.reserve(3);
-
-				for (std::uint32_t i = 0; i < primitive.IndexCount; ++i)
-				{
-					const std::int64_t source =
-						static_cast<std::int64_t>(ReadIndex(*mesh, primitive.FirstIndex + i)) + primitive.VertexOffset;
-
-					if (source < 0 || static_cast<std::size_t>(source) >= vertexCount)
-					{
-						triangle.clear();
-						i += 2 - (i % 3); // Skip the rest of this triangle.
-						continue;
-					}
-
-					const auto vertexIndex = static_cast<std::uint32_t>(source);
-					auto found = remap.find(vertexIndex);
-
-					if (found == remap.end())
-					{
-						const std::byte* vertex =
-							mesh->VertexBytes.data() + stream.DataOffsetBytes + std::size_t(vertexIndex) * layout->Stride;
-						const auto position = ReadFloats<3>(vertex, layout->Position, { 0, 0, 0 });
-						const auto normal = ReadFloats<3>(vertex, layout->Normal, { 0, 1, 0 });
-						const auto tangent = ReadFloats<4>(vertex, layout->Tangent, { 0, 0, 0, 1 });
-						const auto uv = ReadFloats<2>(vertex, layout->TexCoord, { 0, 0 });
-
-						const glm::vec3 p3 = glm::vec3(nodeWorld * glm::vec4(position[0], position[1], position[2], 1.0f));
-						glm::vec3 n3 = normalMatrix * glm::vec3(normal[0], normal[1], normal[2]);
-						n3 = glm::dot(n3, n3) > 1e-20f ? glm::normalize(n3) : glm::vec3(0, 1, 0);
-						glm::vec3 t3 = glm::mat3(nodeWorld) * glm::vec3(tangent[0], tangent[1], tangent[2]);
-
-						if (glm::dot(t3, t3) > 1e-20f)
-						{
-							t3 = glm::normalize(t3);
-						}
-						else
-						{
-							group.HasTangents = false;
-						}
-
-						boundsMin = glm::min(boundsMin, p3);
-						boundsMax = glm::max(boundsMax, p3);
-
-						Swim::Render::StandardVertex v;
-						v.Position = { p3.x, p3.y, p3.z };
-						v.Normal = { n3.x, n3.y, n3.z };
-						v.Tangent = { t3.x, t3.y, t3.z, (tangent[3] < 0.0f) != mirrored ? -1.0f : 1.0f };
-						v.TexCoord0 = uv;
-						out.Vertices.push_back(v);
-						found = remap.emplace(vertexIndex, static_cast<std::uint32_t>(out.Vertices.size() - 1)).first;
-					}
-
-					triangle.push_back(found->second);
-
-					if (triangle.size() == 3)
-					{
-						if (mirrored)
-						{
-							std::swap(triangle[1], triangle[2]);
-						}
-
-						out.Indices.insert(out.Indices.end(), triangle.begin(), triangle.end());
-						triangle.clear();
-					}
-				}
+				AppendPrimitive(group, *mesh, *layout, primitive, vertexCount, nodeWorld, boundsMin, boundsMax);
 			}
 		}
 
@@ -481,44 +540,7 @@ namespace Engine
 
 			if (const auto* material = group.Material.IsValid() ? assets.Resolve(group.Material) : nullptr)
 			{
-				if (const auto* p = FindParameter(*material, "BaseColorFactor"))
-				{
-					desc.BaseColor = p->Value;
-				}
-
-				if (const auto* p = FindParameter(*material, "EmissiveFactor"))
-				{
-					desc.Emissive = { p->Value[0], p->Value[1], p->Value[2] };
-				}
-
-				if (const auto* p = FindParameter(*material, "MetallicFactor"))
-				{
-					desc.Metallic = p->Value[0];
-				}
-
-				if (const auto* p = FindParameter(*material, "RoughnessFactor"))
-				{
-					desc.Roughness = p->Value[0];
-				}
-
-				if (const auto* p = FindParameter(*material, "AlphaCutoff"))
-				{
-					desc.AlphaCutoff = p->Value[0];
-				}
-
-				if (const auto* materialTemplate = material->Template.IsValid() ? assets.Resolve(material->Template) : nullptr)
-				{
-					desc.DoubleSided = (materialTemplate->FeatureMask & FeatureDoubleSided) != 0;
-					desc.Blend = (materialTemplate->FeatureMask & FeatureAlphaBlend) != 0 ? Engine::MaterialBlend::Transparent
-						: (materialTemplate->FeatureMask & FeatureAlphaMask) != 0		  ? Engine::MaterialBlend::Masked
-																						  : Engine::MaterialBlend::Opaque;
-				}
-
-				desc.BaseColorTexture = FindTexture(*material, "BaseColorTexture");
-				desc.MetallicRoughnessTexture = FindTexture(*material, "MetallicRoughnessTexture");
-				desc.NormalTexture = FindTexture(*material, "NormalTexture");
-				desc.OcclusionTexture = FindTexture(*material, "OcclusionTexture");
-				desc.EmissiveTexture = FindTexture(*material, "EmissiveTexture");
+				ReadCookedMaterial(assets, *material, desc);
 
 				for (const auto& texture : { desc.BaseColorTexture, desc.MetallicRoughnessTexture, desc.NormalTexture,
 						 desc.OcclusionTexture, desc.EmissiveTexture })

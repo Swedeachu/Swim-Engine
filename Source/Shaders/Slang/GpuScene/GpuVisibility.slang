@@ -141,7 +141,10 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		return;
 	}
 	Count(VisibilityStatTested);
-	const uint casters = (Views[0].Flags & GpuViewFlagShadowCasters) != 0 ? GpuSceneFlagCastShadows : 0u;
+	// Read once: GPU-assisted validation instruments every buffer load (75 per shader at
+	// most), and Slang otherwise re-loads the field at each use.
+	const uint viewFlags = Views[0].Flags;
+	const uint casters = (viewFlags & GpuViewFlagShadowCasters) != 0 ? GpuSceneFlagCastShadows : 0u;
 	const uint drawable = GpuSceneFlagLive | GpuSceneFlagHasMesh | GpuSceneFlagVisible | casters;
 	uint meshCount;
 	uint meshStride;
@@ -149,8 +152,10 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const bool late = Constants.Phase == VisibilityPhaseLate;
 	const uint excluded = Views[0].ExcludedObjectId;
 	const bool overlay = (instance.Flags & GpuSceneFlagOverlay) != 0u;
+	const bool isStatic = (instance.Flags & GpuSceneFlagStatic) != 0u;
+	const bool wrongLayer = isStatic ? (viewFlags & GpuViewFlagDynamicCasters) != 0u : (viewFlags & GpuViewFlagStaticCasters) != 0u;
 	if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= meshCount || (excluded != 0u && instance.ObjectId + 1u == excluded) ||
-		(overlay && (Views[0].Flags & GpuViewFlagOverlay) == 0u))
+		(overlay && (viewFlags & GpuViewFlagOverlay) == 0u) || wrongLayer)
 	{
 		Count(VisibilityStatNotDrawable);
 		if (late)
@@ -162,19 +167,23 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 
 	// World bounding sphere of the local AABB under the current transform.
 	const GpuViewRecord view = Views[0];
-	const GpuTransformRecord transform = Transforms[instance.TransformIndex];
-	const float3 center = GpuSceneTransformPoint(transform.Current, instance.LocalCenter);
+	float4 current[3];
+	for (uint r = 0; r < 3; ++r)
+	{
+		current[r] = Transforms[instance.TransformIndex].Current[r];
+	}
+	const float3 center = GpuSceneTransformPoint(current, instance.LocalCenter);
 	const float3 e = instance.LocalExtents;
 	const bool unbounded = max(e.x, max(e.y, e.z)) >= 0.5e30;
 	float scale = 0.0;
 	for (uint c = 0; c < 3; ++c)
 	{
-		const float3 column = float3(transform.Current[0][c], transform.Current[1][c], transform.Current[2][c]);
+		const float3 column = float3(current[0][c], current[1][c], current[2][c]);
 		scale = max(scale, length(column));
 	}
 	const float radius = sqrt(dot(e, e)) * scale;
 
-	if (!unbounded && !overlay && (view.Flags & GpuViewFlagDisableFrustumCulling) == 0)
+	if (!unbounded && !overlay && (viewFlags & GpuViewFlagDisableFrustumCulling) == 0)
 	{
 		for (uint p = 0; p < 6; ++p)
 		{
@@ -193,7 +202,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 
 	// Two-phase occlusion: early draws last frame's visible set, late the rest.
 	const bool visibleLastFrame =
-		overlay || (view.Flags & GpuViewFlagResetOcclusionHistory) != 0 || OcclusionHistory[row] == instance.Generation;
+		overlay || (viewFlags & GpuViewFlagResetOcclusionHistory) != 0 || OcclusionHistory[row] == instance.Generation;
 	if (Constants.Phase == VisibilityPhaseEarly && !visibleLastFrame)
 	{
 		Count(VisibilityStatDeferred);
@@ -201,7 +210,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	}
 	if (late)
 	{
-		const bool occluded = (view.Flags & GpuViewFlagDisableOcclusion) == 0 && !unbounded && !overlay && OccludedByHzb(view, center, radius);
+		const bool occluded = (viewFlags & GpuViewFlagDisableOcclusion) == 0 && !unbounded && !overlay && OccludedByHzb(view, center, radius);
 		OcclusionHistory[row] = occluded ? 0u : instance.Generation;
 		if (visibleLastFrame)
 		{
@@ -222,19 +231,16 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float errorScale = view.LodScale / distance;
 	const float threshold = view.LodPixelError * exp2(instance.LodBias);
 	const GpuLodState history = LodStates[row];
-	const bool hasHistory = (view.Flags & GpuViewFlagResetLodHistory) == 0 && history.Generation == instance.Generation &&
+	const bool hasHistory = (viewFlags & GpuViewFlagResetLodHistory) == 0 && history.Generation == instance.Generation &&
 		history.Lod < LodCount(mesh);
 	uint lod = SelectLod(mesh, errorScale, threshold);
-	if (hasHistory)
+	if (hasHistory && lod != history.Lod)
 	{
-		if (lod > history.Lod)
-		{
-			lod = max(history.Lod, SelectLod(mesh, errorScale, threshold * (1.0 - view.LodHysteresis)));
-		}
-		else if (lod < history.Lod)
-		{
-			lod = min(history.Lod, SelectLod(mesh, errorScale, threshold * (1.0 + view.LodHysteresis)));
-		}
+		// Moving to a coarser LOD needs the error past the lowered threshold, a finer one
+		// past the raised threshold (one selection site for both).
+		const bool coarser = lod > history.Lod;
+		const uint again = SelectLod(mesh, errorScale, threshold * (1.0 + (coarser ? -view.LodHysteresis : view.LodHysteresis)));
+		lod = coarser ? max(history.Lod, again) : min(history.Lod, again);
 	}
 	GpuLodState updated;
 	updated.Generation = instance.Generation;

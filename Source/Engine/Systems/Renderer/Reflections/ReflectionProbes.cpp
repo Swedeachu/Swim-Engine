@@ -250,47 +250,66 @@ namespace Swim::Render::ReflectionProbes
 			}));
 	}
 
-	Plan Scheduler::Update(std::span<const ReflectionProbeDesc> probes, const Float3& camera, std::uint64_t frame, double time,
-		const ReflectionProbeSettings& settings, std::span<const ReflectionProbeMover> movers)
+	namespace
 	{
-		Plan plan;
-		const auto slotCount = std::clamp(settings.MaxProbes, 1u, MaxReflectionProbes);
 
-		if (slots.size() != slotCount)
+		// Whether face of a probe at position sees a mover within range (a mover at the probe
+		// itself is its owner: an object probe does not see it).
+		bool FaceSeesMover(std::span<const ReflectionProbeMover> movers, const Float3& position, std::uint32_t face, float range)
 		{
-			slots.assign(slotCount, {});
-		}
-
-		if (!settings.Enabled)
-		{
-			for (auto& slot : slots)
+			for (const auto& mover : movers)
 			{
-				slot = {};
+				const Float3 offset = Sub(mover.Center, position);
+				const float distance = std::sqrt(Dot(offset, offset));
+
+				if (distance > mover.Radius && distance - mover.Radius < range && FaceSees(face, offset, mover.Radius))
+				{
+					return true;
+				}
 			}
 
-			return plan;
+			return false;
 		}
 
-		// Rank the probes: priority / (1 + distance to the camera); the best MaxProbes keep slots.
-		std::vector<std::pair<float, std::uint32_t>> ranked;
-
-		for (std::uint32_t i = 0; i < probes.size(); ++i)
+		// Priority / (1 + distance to the camera), best first; the best slotCount keep slots.
+		std::vector<std::pair<float, std::uint32_t>> RankProbes(
+			std::span<const ReflectionProbeDesc> probes, const Float3& camera, std::uint32_t slotCount)
 		{
-			const float rank = std::max(probes[i].Priority, 1.0e-3f) / (1.0f + Distance(probes[i].Position, camera));
-			ranked.push_back({ rank, i });
-		}
+			std::vector<std::pair<float, std::uint32_t>> ranked;
 
-		std::stable_sort(ranked.begin(), ranked.end(),
-			[](const auto& a, const auto& b)
+			for (std::uint32_t i = 0; i < probes.size(); ++i)
 			{
-				return a.first > b.first;
-			});
+				const float rank = std::max(probes[i].Priority, 1.0e-3f) / (1.0f + Distance(probes[i].Position, camera));
+				ranked.push_back({ rank, i });
+			}
 
-		if (ranked.size() > slotCount)
-		{
-			ranked.resize(slotCount);
+			std::stable_sort(ranked.begin(), ranked.end(),
+				[](const auto& a, const auto& b)
+				{
+					return a.first > b.first;
+				});
+
+			if (ranked.size() > slotCount)
+			{
+				ranked.resize(slotCount);
+			}
+
+			return ranked;
 		}
 
+	} // namespace
+
+	struct Scheduler::Candidate
+	{
+		float Urgency;
+		FaceCapture Capture;
+		bool SeesMover;
+		bool Changed;
+		bool Fresh; // Never captured.
+	};
+
+	std::vector<std::int32_t> Scheduler::AssignSlots(std::span<const ReflectionProbeDesc> probes, std::span<const RankedProbe> ranked)
+	{
 		// Keep the slots of probes still present; release the others; then place new probes.
 		std::vector<std::int32_t> slotOf(probes.size(), -1);
 		std::vector<bool> kept(slots.size(), false);
@@ -336,16 +355,14 @@ namespace Swim::Render::ReflectionProbes
 			}
 		}
 
-		// Face urgencies.
-		struct Candidate
-		{
-			float Urgency;
-			FaceCapture Capture;
-			bool SeesMover;
-			bool Changed;
-		};
+		return slotOf;
+	}
+
+	std::vector<Scheduler::Candidate> Scheduler::CollectCandidates(std::span<const ReflectionProbeDesc> probes,
+		std::span<const RankedProbe> ranked, std::span<const std::int32_t> slotOf, std::uint64_t frame,
+		const ReflectionProbeSettings& settings, std::span<const ReflectionProbeMover> movers)
+	{
 		std::vector<Candidate> candidates;
-		std::vector<std::size_t> chosen;
 		// Changed faces wait in proportion to how large their probe is on screen (its rank
 		// against the best one, 0.5 .. 1): the balls up close refresh every frame, the far
 		// ones at no less than about half that rate.
@@ -372,24 +389,7 @@ namespace Swim::Render::ReflectionProbes
 				// robin, so with FacesPerFrame at least half of them, every one is refreshed at
 				// least every second frame (a far probe is never starved by a near one).
 				bool changed = false;
-				const auto seesMover = [&]
-				{
-					for (const auto& mover : movers)
-					{
-						const Float3 offset = Sub(mover.Center, probe.Position);
-						const float distance = std::sqrt(Dot(offset, offset));
-						// A mover at the probe itself is its owner (an object probe does not see it).
-						if (distance > mover.Radius && distance - mover.Radius < settings.MoverRange &&
-							FaceSees(face, offset, mover.Radius))
-						{
-							return true;
-						}
-					}
-
-					return false;
-				};
-
-				const bool moving = probe.Dynamic && seesMover();
+				const bool moving = probe.Dynamic && FaceSeesMover(movers, probe.Position, face, settings.MoverRange);
 
 				if (slot.FaceFrame[face] == 0)
 				{
@@ -420,7 +420,8 @@ namespace Swim::Render::ReflectionProbes
 
 				if (urgency > 0.0f)
 				{
-					candidates.push_back({ changed ? urgency : urgency * rank, { s, face, index }, moving, changed });
+					candidates.push_back(
+						{ changed ? urgency : urgency * rank, { s, face, index }, moving, changed, slot.FaceFrame[face] == 0 });
 				}
 			}
 		}
@@ -430,7 +431,11 @@ namespace Swim::Render::ReflectionProbes
 			{
 				return a.Urgency > b.Urgency;
 			});
-		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, MaxFacesPerFrame), candidates.size());
+		return candidates;
+	}
+
+	std::vector<std::size_t> Scheduler::ChooseCandidates(const std::vector<Candidate>& candidates, std::size_t budget)
+	{
 		// An eighth of the budget (at least one face from four a frame) is kept for faces whose content did
 		// not change (the idle refresh: animated materials, lighting, and faces whose first
 		// capture came before the scene was there), so a busy scene - movers in view of many
@@ -445,7 +450,7 @@ namespace Swim::Render::ReflectionProbes
 				})));
 		std::size_t changedLeft = budget - idleReserve;
 		const std::size_t changedBudget = changedLeft;
-		chosen.clear();
+		std::vector<std::size_t> chosen;
 		std::vector<bool> taken(candidates.size(), false);
 
 		for (std::size_t i = 0; i < candidates.size() && chosen.size() < budget; ++i)
@@ -456,14 +461,13 @@ namespace Swim::Render::ReflectionProbes
 			}
 
 			const auto& c = candidates[i];
-			const bool fresh = slots[c.Capture.Slot].FaceFrame[c.Capture.Face] == 0;
 
-			if (c.Changed && !fresh && changedLeft == 0)
+			if (c.Changed && !c.Fresh && changedLeft == 0)
 			{
 				continue;
 			}
 
-			if (c.Changed && !fresh)
+			if (c.Changed && !c.Fresh)
 			{
 				// A probe's changed faces are captured together, in one frame. Faces captured
 				// on different frames showed a moving object at two times: across a cube seam
@@ -477,8 +481,7 @@ namespace Swim::Render::ReflectionProbes
 				{
 					const auto& other = candidates[j];
 
-					if (!taken[j] && other.Changed && other.Capture.Slot == c.Capture.Slot &&
-						slots[other.Capture.Slot].FaceFrame[other.Capture.Face] != 0)
+					if (!taken[j] && other.Changed && other.Capture.Slot == c.Capture.Slot && !other.Fresh)
 					{
 						group.push_back(j);
 						taken[j] = true; // Chosen below, or waiting as a whole.
@@ -504,10 +507,10 @@ namespace Swim::Render::ReflectionProbes
 				continue;
 			}
 
-			if (fresh || c.Changed)
+			if (c.Fresh || c.Changed)
 			{
 				changedLeft -= changedLeft > 0 ? 1u : 0u;
-				idleReserve -= changedLeft == 0 && fresh && idleReserve > 0 ? 1u : 0u;
+				idleReserve -= changedLeft == 0 && c.Fresh && idleReserve > 0 ? 1u : 0u;
 			}
 			else if (idleReserve > 0)
 			{
@@ -525,24 +528,11 @@ namespace Swim::Render::ReflectionProbes
 			chosen.push_back(i);
 		}
 
-		for (const auto i : chosen)
-		{
-			const auto& capture = candidates[i].Capture;
-			plan.Captures.push_back(capture);
-			auto& slot = slots[capture.Slot];
-			slot.FaceFrame[capture.Face] = frame;
-			slot.FaceTime[capture.Face] = time;
-			slot.FacePosition[capture.Face] = probes[capture.Probe].Position;
-			slot.FaceSawMover[capture.Face] = candidates[i].SeesMover;
+		return chosen;
+	}
 
-			if (std::find(plan.Filter.begin(), plan.Filter.end(), capture.Slot) == plan.Filter.end())
-			{
-				plan.Filter.push_back(capture.Slot);
-			}
-		}
-
-		std::sort(plan.Filter.begin(), plan.Filter.end());
-
+	void Scheduler::CollectActive(Plan& plan, std::span<const RankedProbe> ranked, std::span<const std::int32_t> slotOf, double time) const
+	{
 		for (const auto& [rank, index] : ranked)
 		{
 			const auto s = static_cast<std::uint32_t>(slotOf[index]);
@@ -566,6 +556,52 @@ namespace Swim::Render::ReflectionProbes
 			{
 				return a.Slot < b.Slot;
 			});
+	}
+
+	Plan Scheduler::Update(std::span<const ReflectionProbeDesc> probes, const Float3& camera, std::uint64_t frame, double time,
+		const ReflectionProbeSettings& settings, std::span<const ReflectionProbeMover> movers)
+	{
+		Plan plan;
+		const auto slotCount = std::clamp(settings.MaxProbes, 1u, MaxReflectionProbes);
+
+		if (slots.size() != slotCount)
+		{
+			slots.assign(slotCount, {});
+		}
+
+		if (!settings.Enabled)
+		{
+			for (auto& slot : slots)
+			{
+				slot = {};
+			}
+
+			return plan;
+		}
+
+		const auto ranked = RankProbes(probes, camera, slotCount);
+		const auto slotOf = AssignSlots(probes, ranked);
+		const auto candidates = CollectCandidates(probes, ranked, slotOf, frame, settings, movers);
+		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, MaxFacesPerFrame), candidates.size());
+
+		for (const auto i : ChooseCandidates(candidates, budget))
+		{
+			const auto& capture = candidates[i].Capture;
+			plan.Captures.push_back(capture);
+			auto& slot = slots[capture.Slot];
+			slot.FaceFrame[capture.Face] = frame;
+			slot.FaceTime[capture.Face] = time;
+			slot.FacePosition[capture.Face] = probes[capture.Probe].Position;
+			slot.FaceSawMover[capture.Face] = candidates[i].SeesMover;
+
+			if (std::find(plan.Filter.begin(), plan.Filter.end(), capture.Slot) == plan.Filter.end())
+			{
+				plan.Filter.push_back(capture.Slot);
+			}
+		}
+
+		std::sort(plan.Filter.begin(), plan.Filter.end());
+		CollectActive(plan, ranked, slotOf, time);
 		return plan;
 	}
 

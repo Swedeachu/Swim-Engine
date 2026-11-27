@@ -39,10 +39,40 @@ struct PyroParams
 	float4 Sun;		 // xyz: direction toward the sun; w: ambient.
 	float4 SunColor; // rgb; w: noise octaves.
 	uint4 Size;
-	VolumeRecord Volumes[MaxVolumes];
 };
 
-[[vk::binding(0, 0)]] StructuredBuffer<PyroParams> Params;
+// PyroParams, then MaxVolumes VolumeRecords, as float4s: one struct of everything would exceed
+// the 2048-byte structured buffer element limit of some targets.
+[[vk::binding(0, 0)]] StructuredBuffer<float4> Params;
+
+static const uint ParamsHeader = 8;	 // float4s of PyroParams.
+static const uint VolumeStride = 5; // float4s of a VolumeRecord.
+
+PyroParams LoadParams()
+{
+	PyroParams params;
+	params.Forward = Params[0];
+	params.Right = Params[1];
+	params.Up = Params[2];
+	params.Camera = Params[3];
+	params.Misc = Params[4];
+	params.Sun = Params[5];
+	params.SunColor = Params[6];
+	params.Size = asuint(Params[7]);
+	return params;
+}
+
+VolumeRecord LoadVolume(uint index)
+{
+	const uint base = ParamsHeader + index * VolumeStride;
+	VolumeRecord v;
+	v.PositionRadius = Params[base];
+	v.Shape = Params[base + 1];
+	v.Color = Params[base + 2];
+	v.Params = Params[base + 3];
+	v.Extra = Params[base + 4];
+	return v;
+}
 [[vk::binding(1, 0)]] Texture2D<float4> Color;
 [[vk::binding(2, 0)]] Texture2D<float> Depth;
 [[vk::binding(3, 0)]] SamplerState LinearClamp;
@@ -214,7 +244,7 @@ float2 ScreenUv(PyroParams params, float3 world)
 [numthreads(8, 8, 1)]
 void computeMain(uint3 id : SV_DispatchThreadID)
 {
-	const PyroParams params = Params[0];
+	const PyroParams params = LoadParams();
 	if (id.x >= params.Size.x || id.y >= params.Size.y)
 	{
 		return;
@@ -243,7 +273,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	float distortionNear = 1.0e9;
 	for (uint i = 0; i < count; ++i)
 	{
-		const VolumeRecord v = params.Volumes[i];
+		const VolumeRecord v = LoadVolume(i);
 		const uint type = uint(v.Shape.x);
 		const float3 centre = BoundCentre(v);
 		const float2 span = SphereSpan(origin, ray, centre, v.PositionRadius.w);
@@ -328,7 +358,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	float transmittance = 1.0;
 	for (uint h = 0; h < hitCount; ++h)
 	{
-		const VolumeRecord v = params.Volumes[hits[h]];
+		const VolumeRecord v = LoadVolume(hits[h]);
 		const float2 span = spans[h];
 		const float dt = (span.y - span.x) / float(steps);
 		for (uint s = 0; s < steps; ++s)
@@ -359,7 +389,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float pixelAngle = params.Misc.y;
 	for (uint h = 0; h < hitCount; ++h)
 	{
-		const VolumeRecord v = params.Volumes[hits[h]];
+		const VolumeRecord v = LoadVolume(hits[h]);
 		const uint embers = uint(v.Extra.y);
 		if (uint(v.Shape.x) != TypeFlame || embers == 0u)
 		{

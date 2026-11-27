@@ -107,6 +107,22 @@ In HDR, the tone mapper's white is the display peak (default 1,000 nits), and SD
 - **Errors:** an invalid frame throws `std::invalid_argument`.
 - **Resources:** `PostProcessGraphResources` names the histogram, the imported exposure state, the params, both bloom chains and the exposure and composite passes, so callers can read any stage back.
 
+## Screen blur
+
+`RenderSettings::Blur` blurs the finished frame (after post-processing, screen anti-aliasing and the `AfterPostProcess` features, before the UI), for backdrops behind menus and other UI:
+
+```cpp
+settings.Blur.Strength = slider;           // 0 = off (no passes, no cost) .. 1 = strongest
+settings.Blur.RegionCount = 1;             // 0 = the whole frame
+settings.Blur.Regions[0] = { x0, y0, x1, y1 }; // frame pixels, x1/y1 exclusive (up to 4)
+```
+
+- **Chain:** a dual-filter (Kawase) blur, `ScreenBlur.slang`: `ScreenBlurDown` halves the frame 1 to 6 times (the centre and four diagonal bilinear taps; the first level decodes sRGB, every level is RGBA16Float, so the blur is in linear light), `ScreenBlurUp` doubles it back to half size (eight taps), and `ScreenBlurComposite` mixes the result over the frame into a new RGBA8 target, which the UI is then drawn over.
+- **Strength:** the radius is about `Strength x 48` pixels at 1080p, scaled with the frame height. The level count follows the radius and the tap offset grows within a level, so a slider moves smoothly; strengths under 0.05 also fade the mix in. Cost at 1080p is a few small compute passes (the largest at half size) plus one full-size composite.
+- **Regions:** with `RegionCount > 0` only pixels inside one of the rectangles are blurred (behind UI panels); the chain still runs over the whole frame, so region edges sample their real surroundings. Outside the regions the frame is copied through.
+- **Between UI layers:** `UiDrawItem::Layer` orders the UI (lower first, list order within a layer). Inside one document, `UiStyle::Layer` puts a subtree in another layer (nearest ancestor-or-self with a nonzero value; popups and tooltips follow their anchor, tooltip target or the node focused when they opened); a quad draws in layer `item.Layer + node layer`, so one document's HUD and menus can sit on either side of the blur. With `Blur.AfterUiLayer = L` the blur runs after the layers `<= L` instead of before all UI, so e.g. a HUD at layer 0 is blurred with the scene and a menu at layer 1 stays sharp on top (`AfterUiLayer = 0`). Unset (the default) blurs before any UI. Strength 0 still records nothing.
+- **Both back ends** (the passes are ordinary runtime compute programs). `RenderStats::BlurLevels` reports the levels a frame used (0 = off).
+
 ## Not yet
 
 - Depth of field and motion blur (later). AO, reflections and fog ([Screen-space effects](ScreenSpace.md), item 76) and TAA (item 75) run before this stack: `TemporalAntiAliasing`'s output is a valid `PostProcessFrame::Source` (see [Temporal anti-aliasing](TemporalAntiAliasing.md)).

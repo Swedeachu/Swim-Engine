@@ -109,6 +109,10 @@ namespace Engine
 		std::optional<std::array<float, 16>> ClipFromCanvas;
 		bool DepthTest = false; // World canvases occluded by the scene.
 		float Opacity = 1.0f;
+		// Draw order: lower layers first, items of one layer in list order. The screen blur
+		// can run between layers (RenderSettings::Blur.AfterUiLayer), e.g. HUD at 0 blurred
+		// with the scene and menus at 1 drawn sharp on top.
+		std::int32_t Layer = 0;
 	};
 
 	struct RenderFrameInput
@@ -189,6 +193,10 @@ namespace Engine
 
 		const RenderStats& GetStats() const { return stats; }
 
+		// The RenderSettings::MsaaSamples values the device supports, as a mask of the counts
+		// (bit 1 = off, then 2, 4, 8, 16): a count the device lacks is lowered to the next one below.
+		std::uint32_t GetSupportedMsaaSamples() const;
+
 		RenderDevice& GetRenderDevice() const { return device; }
 
 		MeshLibrary& GetMeshes() const;
@@ -228,6 +236,22 @@ namespace Engine
 
 		// False when the frame was skipped (minimized, swapchain rebuilding, zero size).
 		bool Render(const RenderFrameInput& input);
+
+		// A sky background from a cube map instead of the procedural sky, drawn behind
+		// everything (the main view, multisampled or not, reflection probes and planar
+		// captures) while RenderSettings::SkyBackground is on, scaled by SkyCubemapIntensity.
+		// Fog and the screen-space passes treat it like the procedural sky; image-based
+		// lighting stays procedural. faces: +X, -X, +Y, -Y, +Z, -Z, each size x size tightly
+		// packed sRGB RGBA8, top row first, as seen from inside the cube. The cube is
+		// left-handed around the default view: +Z is straight ahead (world -Z), -Z behind,
+		// +X to the right (world +X), +Y up. The pixels are copied and uploaded with the next
+		// frame. Throws std::invalid_argument for a zero size or a face of the wrong size.
+		void SetSkyCubemap(std::uint32_t size, const std::array<std::span<const std::byte>, 6>& faces);
+
+		// Back to the procedural sky.
+		void ClearSkyCubemap();
+
+		bool HasSkyCubemap() const;
 
 		// The last captured frame: tightly packed sRGB RGBA8, top row first.
 		const std::vector<std::uint8_t>& GetCapture() const { return capture; }

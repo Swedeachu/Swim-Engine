@@ -12,9 +12,8 @@
 namespace Engine
 {
 
-	// The engine renders through the modern RHI only. Vulkan is the one implemented
-	// backend today; D3D12/Metal are reserved names that fail at startup until their
-	// RHI backends exist.
+	// The RHI backend the engine renders with. A backend that is not built in or fails to
+	// start falls back to Vulkan with a log line; Metal is a reserved name.
 	enum class GraphicsBackend : uint8_t
 	{
 		Auto,
@@ -134,7 +133,7 @@ namespace Engine
 	std::string_view ToString(PresentMode mode);
 
 	// Command line:
-	//   --graphics=auto|vulkan|d3d12|metal   --physics=auto|physx|jolt
+	//   --graphics=auto|vulkan|d3d12|metal (or --rhi=)   --physics=auto|physx|jolt
 	//   --state=playing|paused|stopped       --scene=<name>
 	//   --width=<px> --height=<px> | --size=<W>x<H>
 	//   --vsync=on|off | --no-vsync          --validation[=on|off]

@@ -48,6 +48,9 @@ namespace Swim::Render
 		bool DepthPrepassed = false;
 		std::uint32_t Width = 0; // Render area (the atlas for shadows).
 		std::uint32_t Height = 0;
+		// The pass's sample count: pipelines drawn in it must be created with it (the depth
+		// prepass and opaque passes of a multisampled frame; every other pass has one sample).
+		Rhi::SampleCount Samples = Rhi::SampleCount::X1;
 		// The engine's space-0 table for a pipeline layout whose space 0 follows
 		// ForwardPlusDrawBindings (forward passes) or ShadowDepthBindings (shadows).
 		std::function<Rhi::DescriptorTable&(Rhi::PipelineLayout& layout)> FrameTable;
@@ -68,6 +71,10 @@ namespace Swim::Render
 		std::vector<GraphBuffer> IndirectBuffers; // IndirectArgument (arguments and counts).
 		std::vector<GraphTexture> Textures;		  // ShaderRead.
 		bool SceneCopy = false;					  // Transparent draws read ExternalDrawContext::Scene.
+		// Shadow draws that cast the same depth until ShadowGeneration changes: a cached
+		// cascade keeps them in its static layer instead of redrawing them every frame.
+		bool StaticShadow = false;
+		std::uint64_t ShadowGeneration = 0;
 		std::function<void(ExternalDrawContext&)> Draw;
 	};
 

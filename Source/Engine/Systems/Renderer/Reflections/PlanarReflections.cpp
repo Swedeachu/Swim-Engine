@@ -635,28 +635,9 @@ namespace Swim::Render::PlanarReflections
 		return urgency;
 	}
 
-	const Plan& Planner::Update(std::span<const PlanarReflectorDesc> reflectors, const ViewCamera& camera, std::uint64_t frame, double time,
-		const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers)
+	void Planner::ExpandReflectors(
+		std::span<const PlanarReflectorDesc> reflectors, const ViewCamera& camera, const PlanarReflectionSettings& settings)
 	{
-		plan.Captures.clear();
-		plan.Records.clear();
-		plan.Candidates = 0;
-		plan.Culled = 0;
-		plan.Groups = 0;
-		plan.DynamicCaptures = 0;
-
-		if (!settings.Enabled || reflectors.empty())
-		{
-			return plan;
-		}
-
-		const auto maxPlanes = std::clamp(settings.MaxPlanes, 1u, MaxPlanarReflections);
-
-		if (slots.size() != maxPlanes)
-		{
-			slots.assign(maxPlanes, Slot{});
-		}
-
 		cameraFrustum = FrustumPlanes(camera.ViewProjection);
 		candidates.clear();
 
@@ -697,7 +678,10 @@ namespace Swim::Render::PlanarReflections
 				break;
 			}
 		}
+	}
 
+	void Planner::SortCandidates()
+	{
 		// Largest first; ties by key keep the order (and slots) stable.
 		order.resize(candidates.size());
 
@@ -712,7 +696,10 @@ namespace Swim::Render::PlanarReflections
 				return candidates[a].Score != candidates[b].Score ? candidates[a].Score > candidates[b].Score
 																  : candidates[a].Key < candidates[b].Key;
 			});
+	}
 
+	void Planner::MergeCoplanar(const PlanarReflectionSettings& settings, std::uint32_t maxPlanes)
+	{
 		// Coplanar faces (within the tolerances) share one capture.
 		groups.clear();
 		const float cosTolerance = std::cos(std::max(settings.PlaneAngleTolerance, 0.0f));
@@ -792,7 +779,11 @@ namespace Swim::Render::PlanarReflections
 
 			target->NearD = target->MinD; // The member plane nearest the reflected camera.
 		}
+	}
 
+	void Planner::RankGroups(const ViewCamera& camera, std::uint64_t frame, double time, const PlanarReflectionSettings& settings,
+		std::span<const ReflectionProbeMover> movers)
+	{
 		plan.Groups = static_cast<std::uint32_t>(groups.size());
 		wanted.clear();
 		urgent.clear();
@@ -860,7 +851,11 @@ namespace Swim::Render::PlanarReflections
 				urgent.push_back({ urgency * (1.0f + groups[gi].Score / std::max(camera.ViewportHeight, 1.0f)), gi, dynamic, moverInside });
 			}
 		}
+	}
 
+	void Planner::TakeCaptures(
+		const ViewCamera& camera, double time, const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers)
+	{
 		std::sort(urgent.begin(), urgent.end(),
 			[](const Urgent& a, const Urgent& b)
 			{
@@ -887,7 +882,10 @@ namespace Swim::Render::PlanarReflections
 			slot.State = w;
 			plan.Captures.push_back(w.View);
 		}
+	}
 
+	void Planner::WriteRecords(const PlanarReflectionSettings& settings)
+	{
 		// Records: every group whose slot holds a capture (what the layer holds, which may be
 		// a few frames old: the lookup reprojects it).
 		const float atlas = float(std::max(settings.AtlasResolution, 64u));
@@ -929,7 +927,36 @@ namespace Swim::Render::PlanarReflections
 			record.Params[3] = std::max(settings.RoughnessFadeEnd, settings.RoughnessFadeStart + 1.0e-3f);
 			plan.Records.push_back(record);
 		}
+	}
 
+	const Plan& Planner::Update(std::span<const PlanarReflectorDesc> reflectors, const ViewCamera& camera, std::uint64_t frame, double time,
+		const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers)
+	{
+		plan.Captures.clear();
+		plan.Records.clear();
+		plan.Candidates = 0;
+		plan.Culled = 0;
+		plan.Groups = 0;
+		plan.DynamicCaptures = 0;
+
+		if (!settings.Enabled || reflectors.empty())
+		{
+			return plan;
+		}
+
+		const auto maxPlanes = std::clamp(settings.MaxPlanes, 1u, MaxPlanarReflections);
+
+		if (slots.size() != maxPlanes)
+		{
+			slots.assign(maxPlanes, Slot{});
+		}
+
+		ExpandReflectors(reflectors, camera, settings);
+		SortCandidates();
+		MergeCoplanar(settings, maxPlanes);
+		RankGroups(camera, frame, time, settings, movers);
+		TakeCaptures(camera, time, settings, movers);
+		WriteRecords(settings);
 		return plan;
 	}
 

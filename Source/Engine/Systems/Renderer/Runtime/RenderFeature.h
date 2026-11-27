@@ -124,6 +124,10 @@ namespace Engine
 		// Transparent draws read the opaque scene behind them (RenderFeatureDrawContext::
 		// SceneColor / SceneDepth): one copy per frame, shared by every feature that asks.
 		bool SceneCopy = false;
+		// The shadow-pass draws cast the same depth until ShadowGeneration changes (bump it on
+		// every geometry change): cached cascades keep them in their static layer.
+		bool StaticShadow = false;
+		std::uint64_t ShadowGeneration = 0;
 	};
 
 	// Fixed-function state of a feature draw; the rest comes from the pass (targets, depth
@@ -135,6 +139,18 @@ namespace Engine
 		// in the prepass (the late phase of occlusion culling), so they test and write depth
 		// like a frame without a prepass instead of matching the prepass depth.
 		bool SkipsPrepass = false;
+		// Multisampled frames, depth prepass and opaque passes: colour target 0's alpha also
+		// masks the samples written (alpha to coverage), for cutouts with antialiased edges.
+		// The program writes its coverage there (the depth prepass program declares an
+		// SV_Target0 for it). Ignored when the pass has one sample (RenderFeatureDrawContext::Samples).
+		bool AlphaToCoverage = false;
+		// Depth bias for coplanar layers (decals, glass or other translucent faces flush with
+		// another face), added before the depth test: DepthBias in the depth format's smallest
+		// resolvable steps, SlopeDepthBias times the primitive's depth slope. Positive draws
+		// nearer (the depth is reverse-Z), so the biased layer wins against the face it lies on.
+		// Not applied to shadow tiles. Typical: DepthBias 1-4, SlopeDepthBias 1. 0 = none.
+		float DepthBias = 0.0f;
+		float SlopeDepthBias = 0.0f;
 
 		bool operator==(const RenderGeometryState&) const = default;
 	};
@@ -170,6 +186,10 @@ namespace Engine
 
 		RenderFeatureComputePass& Storage(std::string_view name, Swim::Render::GraphTexture texture);
 
+		// A RWTexture2D the pass reads and writes in place (earlier contents are kept): effects
+		// that only touch some pixels skip a full-screen copy into a new target.
+		RenderFeatureComputePass& ReadWriteStorage(std::string_view name, Swim::Render::GraphTexture texture);
+
 		RenderFeatureComputePass& Buffer(std::string_view name, Swim::Render::GraphBuffer buffer);
 
 		RenderFeatureComputePass& StorageBuffer(std::string_view name, Swim::Render::GraphBuffer buffer);
@@ -203,6 +223,7 @@ namespace Engine
 			StorageBuffer,
 			Sampler,
 			WriteBuffer,
+			ReadWriteStorage,
 		};
 
 		struct Binding
@@ -237,7 +258,8 @@ namespace Engine
 			std::function<Swim::Rhi::Sampler&(std::string_view)> GetSampler;
 			Swim::Rhi::Device* Device = nullptr;
 			std::span<const RenderFeatureShadowView> ShadowViews;
-			std::function<RenderFeatureGeometryPipeline(std::string_view, RenderGeometryPass, bool, const RenderGeometryState&)>
+			std::function<RenderFeatureGeometryPipeline(
+				std::string_view, RenderGeometryPass, bool, const RenderGeometryState&, Swim::Rhi::SampleCount)>
 				GetGeometryPipeline;
 			// Rewrites a compute pass's push constants before it is recorded (tweak variables).
 			std::function<void(std::string_view, const RuntimeComputeProgram&, std::span<std::byte>)> OverrideConstants;
@@ -398,6 +420,10 @@ namespace Engine
 		// geometry (it drew into DepthPrepass too). The pipeline then tests equal-or-nearer
 		// without writing depth, so the vertex stage must produce the prepass's exact depths.
 		bool DepthPrepassed() const { return draw.DepthPrepassed; }
+
+		// The pass's sample count: above 1 in the depth prepass and opaque passes of a
+		// multisampled frame (RenderSettings::MsaaSamples), where Program pipelines match it.
+		std::uint32_t Samples() const { return static_cast<std::uint32_t>(draw.Samples); }
 
 		// Shadow only: the shadow views buffer row of this tile (ShadowFrame.slang Views[...])
 		// and its view-projection (row-major, reverse-Z).

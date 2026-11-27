@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_ENVIRONMENT_SKY_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_DOWNSAMPLE_SPIRV_PATH) &&                                         \
@@ -79,9 +80,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "PBR gallery smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		Smoke::EnvironmentPrograms programs(*device);
@@ -89,7 +88,7 @@ namespace
 		const auto& draw = galleryInterface.Interface;
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", galleryBytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", galleryBytes } } };
-		auto program = device->CreateShaderProgram({ stages, { draw.DescriptorSchemas, draw.PushConstants }, "PBR gallery" });
+		auto program = device->CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(draw), "PBR gallery" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "PBR gallery layout" });
 		SWIM_REQUIRE(layout);
@@ -370,11 +369,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PbrGalleryMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunPbrGallerySmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunPbrGallerySmoke>("PbrGalleryMatchesTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

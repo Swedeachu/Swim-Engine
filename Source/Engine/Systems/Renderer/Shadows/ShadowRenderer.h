@@ -52,6 +52,15 @@ namespace Swim::Render
 		std::uint32_t VertexPage = 0;
 	};
 
+	// A rectangle of the shadow atlas, in texels.
+	struct ShadowRect
+	{
+		std::uint32_t X = 0;
+		std::uint32_t Y = 0;
+		std::uint32_t Width = 0;
+		std::uint32_t Height = 0;
+	};
+
 	struct ShadowFrame
 	{
 		const GpuSceneGraphResources* Scene = nullptr;
@@ -70,6 +79,18 @@ namespace Swim::Render
 		std::optional<GraphTexture> Atlas;
 		std::vector<std::uint8_t> Render; // Per Plan->Draws (empty: all); only with Atlas.
 		bool AtlasHoldsDepth = true;	  // False the first time: the atlas is cleared whole, not loaded.
+		// Optional static layer (needs Atlas): a second persistent D32Float atlas holding only
+		// the static casters (RenderObjectFlags::Static, ExternalGeometryDraws::StaticShadow).
+		// Per rendered view, StaticRender says: 0 copy the kept static tile into Atlas and draw
+		// only the dynamic casters on top; 1 redraw the static tile first, then the same; 2 no
+		// layer (the tile is cleared and every caster drawn, as without StaticAtlas).
+		std::optional<GraphTexture> StaticAtlas;
+		std::vector<std::uint8_t> StaticRender; // Per Plan->Draws; only with StaticAtlas.
+		// Per Plan->Draws (or empty): for a StaticRender 0 view, the part of its tile that is
+		// copied and redrawn (where the moving casters were and are; the rest still holds last
+		// frame's depth). Width 0: the whole tile.
+		std::vector<ShadowRect> StaticRects;
+		bool StaticAtlasHoldsDepth = true;
 		// Draws added to every rendered view's tile after the engine's casters.
 		std::vector<ExternalGeometryDraws> External;
 	};

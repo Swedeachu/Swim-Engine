@@ -1,120 +1,12 @@
-#include "Engine/Systems/Audio/AudioSystem.h"
-
-#include "Engine/Commands/CommandRegistry.h"
-
-#if SWIM_AUDIO_MINIAUDIO
-#include <miniaudio.h>
-#endif
-
-#include <glm/geometric.hpp>
-
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <iostream>
-#include <map>
-#include <random>
-#include <thread>
-#include <unordered_map>
+#include "Engine/Systems/Audio/AudioSystemImpl.h"
 
 namespace Engine
 {
 
+	using namespace AudioDetail;
+
 	namespace
 	{
-
-		constexpr const char* Category = "Audio";
-		constexpr std::uint32_t MaxSlots = 512;	 // Voice slots (a stopping voice keeps its slot until it ends).
-		constexpr std::uint32_t MaxBuses = 64;
-		constexpr std::uint64_t StreamThreshold = 1u << 20;
-		constexpr float StealFadeSeconds = 0.01f;
-
-		// Single producer, single consumer; the producer spins (yields) when it is full.
-		template <typename T, std::size_t Capacity> class SpscQueue
-		{
-
-		  public:
-
-			void Push(T value)
-			{
-				const auto tail = writeIndex.load(std::memory_order_relaxed);
-
-				while (tail - readIndex.load(std::memory_order_acquire) >= Capacity)
-				{
-					std::this_thread::yield();
-				}
-
-				slots[tail % Capacity] = std::move(value);
-				writeIndex.store(tail + 1, std::memory_order_release);
-			}
-
-			bool Pop(T& value)
-			{
-				const auto head = readIndex.load(std::memory_order_relaxed);
-
-				if (head == writeIndex.load(std::memory_order_acquire))
-				{
-					return false;
-				}
-
-				value = std::move(slots[head % Capacity]);
-				readIndex.store(head + 1, std::memory_order_release);
-				return true;
-			}
-
-		  private:
-
-			std::array<T, Capacity> slots{};
-			alignas(64) std::atomic<std::uint64_t> writeIndex{ 0 };
-			alignas(64) std::atomic<std::uint64_t> readIndex{ 0 };
-
-		};
-
-		enum class CommandType : std::uint8_t
-		{
-			Play,
-			Stop,
-			Pause,
-			Volume,
-			Pitch,
-			Position,
-			BusCreate,
-			BusVolume,
-			Listener,
-			Device,
-			Preload,
-		};
-
-		struct Command
-		{
-			CommandType Type = CommandType::Play;
-			std::uint32_t Slot = 0;
-			std::uint32_t Generation = 0;
-			std::uint32_t Bus = 0;
-			std::uint32_t Parent = 0;
-			float Value = 0.0f;
-			float Seconds = 0.0f;
-			bool Flag = false;
-			PlayParams Params; // Play only (callbacks stay on the main thread).
-			AudioListener Listener;
-			std::filesystem::path Path;
-			std::string Text;
-		};
-
-		enum class EventType : std::uint8_t
-		{
-			Finished,
-			Marker,
-		};
-
-		struct Event
-		{
-			EventType Type = EventType::Finished;
-			std::uint32_t Slot = 0;
-			std::uint32_t Generation = 0;
-			std::uint32_t Marker = 0;
-		};
 
 		bool GlobMatch(std::string_view pattern, std::string_view text)
 		{
@@ -161,717 +53,6 @@ namespace Engine
 
 	} // namespace
 
-	struct AudioSystem::Impl
-	{
-		struct Voice
-		{
-			std::uint32_t Generation = 0;
-			bool Active = false;   // Holds its slot until the backend reports the end.
-			bool Counted = false;  // Counts against the voice limit (false once stopped or stolen).
-			int Priority = 0;
-			std::uint64_t Order = 0;
-			std::uint32_t Group = UINT32_MAX;
-			BusHandle Bus{};
-			std::function<void(VoiceHandle)> OnFinished;
-			std::function<void(VoiceHandle, std::uint32_t)> OnMarker;
-		};
-
-		struct Sound
-		{
-			std::filesystem::path Path;
-			SoundLoad Load = SoundLoad::Auto;
-			std::string Key; // As given to LoadSound.
-		};
-
-		struct Group
-		{
-			std::string Name;
-			SoundGroupDesc Desc;
-			std::vector<SoundHandle> Sounds;
-			bool Expanded = false;
-			std::uint32_t Next = 0;
-			std::uint32_t Last = UINT32_MAX;
-			double LastPlay = -1.0e9;
-		};
-
-		struct Bus
-		{
-			std::string Name;
-			std::uint32_t Parent = 0;
-			float Volume = 1.0f;
-			Swim::Commands::ConsoleVariable* Variable = nullptr;
-		};
-
-		AudioSystemDesc desc;
-		Swim::Commands::CommandRegistry* commands = nullptr;
-		AudioOutput output = AudioOutput::Off;
-		std::map<std::string, std::filesystem::path, std::less<>> roots;
-		std::vector<std::string> warnedRoots;
-		std::vector<Sound> sounds{ Sound{} }; // Id 0 is invalid.
-		std::unordered_map<std::string, std::uint32_t> soundIds;
-		std::vector<Group> groups;
-		std::unordered_map<std::string, std::uint32_t> groupIds;
-		std::unordered_map<std::string, std::string> events;
-		std::vector<Bus> buses;
-		std::array<Voice, MaxSlots> voices{};
-		std::uint64_t order = 0;
-		std::uint64_t played = 0;
-		std::function<void(const AudioPlayRecord&)> playObserver;
-		std::uint64_t stolen = 0;
-		std::uint64_t refused = 0;
-		double time = 0.0;
-		std::mt19937 random{ 0x5EEDu };
-		std::optional<glm::vec3> lastCameraPosition;
-		Swim::Commands::ConsoleVariable* maxVoices = nullptr;
-		Swim::Commands::ConsoleVariable* device = nullptr;
-
-		SpscQueue<Command, 1024> commandQueue;
-		SpscQueue<Event, 4096> eventQueue;
-		std::thread thread;
-		std::atomic<bool> running{ false };
-
-#if SWIM_AUDIO_MINIAUDIO
-		// Audio thread state.
-		struct Slot
-		{
-			ma_sound Sound{};
-			bool Live = false;
-			bool Paused = false;
-			bool Stream = false;
-			bool Starved = false;
-			std::uint32_t Generation = 0;
-			std::vector<float> Markers;
-			std::uint32_t NextMarker = 0;
-			float LastCursor = 0.0f;
-		};
-
-		ma_engine engine{};
-		ma_resource_manager resourceManager{};
-		bool resourceManagerReady = false;
-		ma_context context{};
-		ma_device outputDevice{};
-		bool engineReady = false;
-		bool contextReady = false;
-		bool deviceReady = false;
-		std::atomic<bool> deviceLost{ false };
-		std::atomic<bool> closingDevice{ false };
-		std::string deviceName = "default";
-		std::string wantedDevice;
-		std::array<ma_sound_group, MaxBuses> groupsBackend{};
-		std::array<bool, MaxBuses> groupReady{};
-		std::vector<Slot> slots = std::vector<Slot>(MaxSlots);
-		std::vector<float> nullScratch;
-		std::atomic<std::uint32_t> sampleRate{ 0 };
-		std::string deviceNameShared; // Written by the audio thread under deviceNameLock.
-		std::atomic_flag deviceNameLock = ATOMIC_FLAG_INIT;
-
-		// Glitch counters for audio_stats: device callbacks that took longer than the audio they
-		// produced, callbacks that came late (the device ran dry before them), and streams that
-		// had no decoded audio ready while playing.
-		std::atomic<std::uint64_t> callbackOverruns{ 0 };
-		std::atomic<std::uint64_t> callbackLate{ 0 };
-		std::atomic<std::uint64_t> streamStarved{ 0 };
-		std::int64_t lastCallback = 0;
-
-		static void DataCallback(ma_device* device, void* output, const void*, ma_uint32 frameCount)
-		{
-			auto* self = static_cast<Impl*>(device->pUserData);
-			using Nanoseconds = std::chrono::nanoseconds;
-			const auto start = std::chrono::duration_cast<Nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-			ma_engine_read_pcm_frames(&self->engine, output, frameCount, nullptr);
-			const auto end = std::chrono::duration_cast<Nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-			const double period = double(frameCount) * 1.0e9 / double(std::max(device->sampleRate, 1u));
-
-			if (double(end - start) > period)
-			{
-				self->callbackOverruns.fetch_add(1, std::memory_order_relaxed);
-			}
-
-			// A buffer of `periods` periods: a gap longer than all of it played silence.
-			if (self->lastCallback != 0 && double(start - self->lastCallback) > period * double(std::max(device->playback.internalPeriods, 2u)))
-			{
-				self->callbackLate.fetch_add(1, std::memory_order_relaxed);
-			}
-
-			self->lastCallback = start;
-		}
-
-		static void NotificationCallback(const ma_device_notification* notification)
-		{
-			auto* self = static_cast<Impl*>(notification->pDevice->pUserData);
-
-			if (notification->type == ma_device_notification_type_stopped && !self->closingDevice.load())
-			{
-				self->deviceLost.store(true);
-			}
-		}
-
-		void PublishDeviceName(std::string name)
-		{
-			while (deviceNameLock.test_and_set(std::memory_order_acquire))
-			{
-			}
-
-			deviceNameShared = std::move(name);
-			deviceNameLock.clear(std::memory_order_release);
-		}
-
-		std::string ReadDeviceName()
-		{
-			while (deviceNameLock.test_and_set(std::memory_order_acquire))
-			{
-			}
-
-			auto copy = deviceNameShared;
-			deviceNameLock.clear(std::memory_order_release);
-			return copy;
-		}
-
-		void CloseDevice()
-		{
-			if (deviceReady)
-			{
-				closingDevice.store(true);
-				ma_device_uninit(&outputDevice);
-				deviceReady = false;
-				closingDevice.store(false);
-			}
-		}
-
-		bool OpenDevice(const std::string& name)
-		{
-			CloseDevice();
-
-			if (!contextReady)
-			{
-				return false;
-			}
-
-			ma_device_info* playback = nullptr;
-			ma_uint32 playbackCount = 0;
-			const ma_device_id* id = nullptr;
-			std::string opened = "default";
-
-			if (!name.empty() && ma_context_get_devices(&context, &playback, &playbackCount, nullptr, nullptr) == MA_SUCCESS)
-			{
-				for (ma_uint32 i = 0; i < playbackCount; ++i)
-				{
-					if (name == playback[i].name)
-					{
-						id = &playback[i].id;
-						opened = playback[i].name;
-					}
-				}
-			}
-
-			ma_device_config config = ma_device_config_init(ma_device_type_playback);
-			// 3 x 20 ms: enough slack for the mix to ride out a loaded CPU, still 60 ms at most.
-			config.performanceProfile = ma_performance_profile_conservative;
-			config.periodSizeInMilliseconds = 20;
-			config.periods = 3;
-			config.playback.format = ma_format_f32;
-			config.playback.channels = desc.Channels;
-			config.playback.pDeviceID = id;
-			config.sampleRate = desc.SampleRate;
-			config.dataCallback = &DataCallback;
-			config.notificationCallback = &NotificationCallback;
-			config.pUserData = this;
-
-			if (ma_device_init(&context, &config, &outputDevice) != MA_SUCCESS)
-			{
-				return false;
-			}
-
-			deviceReady = true;
-
-			if (ma_device_start(&outputDevice) != MA_SUCCESS)
-			{
-				CloseDevice();
-				return false;
-			}
-
-			if (!id)
-			{
-				ma_device_info info{};
-
-				if (ma_device_get_info(&outputDevice, ma_device_type_playback, &info) == MA_SUCCESS)
-				{
-					opened = info.name;
-				}
-			}
-
-			deviceName = opened;
-			PublishDeviceName(opened);
-			return true;
-		}
-
-		bool StartBackend()
-		{
-			// Two decoding threads, so one slow stream page does not hold up the others.
-			ma_resource_manager_config resources = ma_resource_manager_config_init();
-			resources.decodedFormat = ma_format_f32;
-			resources.decodedChannels = desc.Channels;
-			resources.decodedSampleRate = desc.SampleRate;
-			resources.jobThreadCount = 2;
-			resourceManagerReady = ma_resource_manager_init(&resources, &resourceManager) == MA_SUCCESS;
-			ma_engine_config config = ma_engine_config_init();
-			config.pResourceManager = resourceManagerReady ? &resourceManager : nullptr;
-			config.noDevice = MA_TRUE;
-			config.channels = desc.Channels;
-			config.sampleRate = desc.SampleRate;
-			config.listenerCount = 1;
-
-			if (ma_engine_init(&config, &engine) != MA_SUCCESS)
-			{
-				return false;
-			}
-
-			engineReady = true;
-			sampleRate.store(ma_engine_get_sample_rate(&engine));
-
-			if (output == AudioOutput::Device)
-			{
-				// The device thread runs at the highest priority: a mix that starts late under a
-				// loaded CPU is heard as a periodic chug.
-				ma_context_config contextConfig = ma_context_config_init();
-				contextConfig.threadPriority = ma_thread_priority_highest;
-				contextReady = ma_context_init(nullptr, 0, &contextConfig, &context) == MA_SUCCESS;
-
-				if (!OpenDevice(wantedDevice) && !OpenDevice({}))
-				{
-					std::cerr << "[Audio] No output device could be opened; using the null output.\n";
-					output = AudioOutput::Null;
-				}
-			}
-
-			if (output == AudioOutput::Null)
-			{
-				PublishDeviceName("null");
-			}
-
-			CreateBus(0, UINT32_MAX);
-			return true;
-		}
-
-		void StopBackend()
-		{
-			CloseDevice();
-
-			for (auto& slot : slots)
-			{
-				if (slot.Live)
-				{
-					ma_sound_uninit(&slot.Sound);
-					slot.Live = false;
-				}
-			}
-
-			for (std::uint32_t i = MaxBuses; i-- > 0;)
-			{
-				if (groupReady[i])
-				{
-					ma_sound_group_uninit(&groupsBackend[i]);
-					groupReady[i] = false;
-				}
-			}
-
-			if (engineReady)
-			{
-				ma_engine_uninit(&engine);
-				engineReady = false;
-			}
-
-			if (resourceManagerReady)
-			{
-				ma_resource_manager_uninit(&resourceManager);
-				resourceManagerReady = false;
-			}
-
-			if (contextReady)
-			{
-				ma_context_uninit(&context);
-				contextReady = false;
-			}
-		}
-
-		void CreateBus(std::uint32_t bus, std::uint32_t parent)
-		{
-			if (bus >= MaxBuses || groupReady[bus])
-			{
-				return;
-			}
-
-			ma_sound_group* parentGroup = parent < MaxBuses && groupReady[parent] ? &groupsBackend[parent] : nullptr;
-			groupReady[bus] = ma_sound_group_init(&engine, 0, parentGroup, &groupsBackend[bus]) == MA_SUCCESS;
-		}
-
-		static ma_attenuation_model Model(SoundAttenuationModel model)
-		{
-			switch (model)
-			{
-			case SoundAttenuationModel::Linear:
-				return ma_attenuation_model_linear;
-			case SoundAttenuationModel::Exponential:
-				return ma_attenuation_model_exponential;
-			default:
-				return ma_attenuation_model_inverse;
-			}
-		}
-
-		static std::uint64_t Milliseconds(float seconds) { return static_cast<std::uint64_t>(std::max(seconds, 0.0f) * 1000.0f + 0.5f); }
-
-		void Finish(std::uint32_t index)
-		{
-			auto& slot = slots[index];
-
-			if (slot.Live)
-			{
-				ma_sound_uninit(&slot.Sound);
-				slot.Live = false;
-			}
-
-			eventQueue.Push({ EventType::Finished, index, slot.Generation, 0 });
-		}
-
-		void ExecutePlay(Command& command)
-		{
-			auto& slot = slots[command.Slot];
-
-			if (slot.Live)
-			{
-				ma_sound_uninit(&slot.Sound);
-				slot.Live = false;
-			}
-
-			slot.Generation = command.Generation;
-			const auto& params = command.Params;
-			std::error_code error;
-			const auto size = std::filesystem::file_size(command.Path, error);
-
-			if (error)
-			{
-				Finish(command.Slot);
-				return;
-			}
-
-			const bool stream =
-				params.Load == SoundLoad::Stream || (params.Load == SoundLoad::Auto && size > StreamThreshold);
-			ma_uint32 flags = MA_SOUND_FLAG_ASYNC | (stream ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE);
-
-			if (!params.Position)
-			{
-				flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
-			}
-
-			ma_sound_group* group = command.Bus < MaxBuses && groupReady[command.Bus] ? &groupsBackend[command.Bus] : nullptr;
-#ifdef _WIN32
-			const ma_result result = ma_sound_init_from_file_w(&engine, command.Path.c_str(), flags, group, nullptr, &slot.Sound);
-#else
-			const ma_result result = ma_sound_init_from_file(&engine, command.Path.c_str(), flags, group, nullptr, &slot.Sound);
-#endif
-
-			if (result != MA_SUCCESS)
-			{
-				Finish(command.Slot);
-				return;
-			}
-
-			slot.Live = true;
-			slot.Paused = false;
-			slot.Stream = stream;
-			slot.Starved = false;
-			slot.Markers = params.Markers;
-			std::sort(slot.Markers.begin(), slot.Markers.end());
-			slot.NextMarker = 0;
-			slot.LastCursor = params.StartSeconds;
-			auto* sound = &slot.Sound;
-			ma_sound_set_looping(sound, params.Loop ? MA_TRUE : MA_FALSE);
-			ma_sound_set_pitch(sound, std::clamp(params.Pitch, 0.05f, 8.0f));
-
-			if (params.Position)
-			{
-				const auto& p = *params.Position;
-				const auto& a = params.Attenuation;
-				ma_sound_set_position(sound, p.x, p.y, p.z);
-				ma_sound_set_velocity(sound, params.Velocity.x, params.Velocity.y, params.Velocity.z);
-				ma_sound_set_attenuation_model(sound, Model(a.Model));
-				ma_sound_set_min_distance(sound, std::max(a.MinDistance, 0.01f));
-				ma_sound_set_max_distance(sound, std::max(a.MaxDistance, a.MinDistance));
-				ma_sound_set_rolloff(sound, std::max(a.Rolloff, 0.0f));
-				ma_sound_set_doppler_factor(sound, std::max(a.Doppler, 0.0f));
-			}
-			else
-			{
-				ma_sound_set_pan(sound, std::clamp(params.Pan, -1.0f, 1.0f));
-			}
-
-			if (params.StartSeconds > 0.0f)
-			{
-				ma_sound_seek_to_second(sound, params.StartSeconds);
-			}
-
-			const float volume = std::max(params.Volume, 0.0f);
-			ma_sound_set_fade_in_milliseconds(sound, params.FadeInSeconds > 0.0f ? 0.0f : volume, volume, Milliseconds(params.FadeInSeconds));
-			ma_sound_start(sound);
-		}
-
-		void Execute(Command& command)
-		{
-			Slot* slot = command.Slot < MaxSlots ? &slots[command.Slot] : nullptr;
-			const bool live = slot && slot->Live && slot->Generation == command.Generation;
-
-			switch (command.Type)
-			{
-			case CommandType::Play:
-				ExecutePlay(command);
-				break;
-			case CommandType::Stop:
-				if (live)
-				{
-					slot->Paused = false;
-
-					if (command.Seconds > 0.0f && ma_sound_is_playing(&slot->Sound))
-					{
-						ma_sound_stop_with_fade_in_milliseconds(&slot->Sound, Milliseconds(command.Seconds));
-					}
-					else
-					{
-						Finish(command.Slot);
-					}
-				}
-
-				break;
-			case CommandType::Pause:
-				if (live && slot->Paused != command.Flag)
-				{
-					slot->Paused = command.Flag;
-					command.Flag ? ma_sound_stop(&slot->Sound) : ma_sound_start(&slot->Sound);
-				}
-
-				break;
-			case CommandType::Volume:
-				if (live)
-				{
-					ma_sound_set_fade_in_milliseconds(&slot->Sound, -1.0f, std::max(command.Value, 0.0f), Milliseconds(command.Seconds));
-				}
-
-				break;
-			case CommandType::Pitch:
-				if (live)
-				{
-					ma_sound_set_pitch(&slot->Sound, std::clamp(command.Value, 0.05f, 8.0f));
-				}
-
-				break;
-			case CommandType::Position:
-				if (live)
-				{
-					const auto& p = command.Listener.Position;
-					const auto& v = command.Listener.Velocity;
-					ma_sound_set_position(&slot->Sound, p.x, p.y, p.z);
-					ma_sound_set_velocity(&slot->Sound, v.x, v.y, v.z);
-				}
-
-				break;
-			case CommandType::BusCreate:
-				CreateBus(command.Bus, command.Parent);
-				break;
-			case CommandType::BusVolume:
-				if (command.Bus < MaxBuses && groupReady[command.Bus])
-				{
-					ma_sound_group_set_volume(&groupsBackend[command.Bus], std::max(command.Value, 0.0f));
-				}
-
-				break;
-			case CommandType::Listener:
-			{
-				const auto& l = command.Listener;
-				ma_engine_listener_set_position(&engine, 0, l.Position.x, l.Position.y, l.Position.z);
-				ma_engine_listener_set_direction(&engine, 0, l.Forward.x, l.Forward.y, l.Forward.z);
-				ma_engine_listener_set_world_up(&engine, 0, l.Up.x, l.Up.y, l.Up.z);
-				ma_engine_listener_set_velocity(&engine, 0, l.Velocity.x, l.Velocity.y, l.Velocity.z);
-				break;
-			}
-			case CommandType::Device:
-				wantedDevice = command.Text;
-
-				if (output == AudioOutput::Device && !OpenDevice(wantedDevice) && !OpenDevice({}))
-				{
-					std::cerr << "[Audio] Could not open an output device.\n";
-				}
-
-				break;
-			case CommandType::Preload:
-#ifdef _WIN32
-				ma_resource_manager_register_file_w(ma_engine_get_resource_manager(&engine), command.Path.c_str(),
-					MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_DECODE | MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_ASYNC);
-#else
-				ma_resource_manager_register_file(ma_engine_get_resource_manager(&engine), command.Path.c_str(),
-					MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_DECODE | MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_ASYNC);
-#endif
-				break;
-			}
-		}
-
-		void Poll()
-		{
-			for (std::uint32_t i = 0; i < MaxSlots; ++i)
-			{
-				auto& slot = slots[i];
-
-				if (!slot.Live || slot.Paused)
-				{
-					continue;
-				}
-
-				if (!ma_sound_is_playing(&slot.Sound))
-				{
-					Finish(i);
-					continue;
-				}
-
-				if (slot.Stream)
-				{
-					// Counted once per dry spell: nothing decoded ahead of a stream that is not at its end.
-					ma_uint64 available = 0;
-					ma_uint64 cursor = 0;
-					ma_uint64 length = 0;
-					auto* source = slot.Sound.pResourceManagerDataSource;
-					const bool known = source && ma_resource_manager_data_source_get_available_frames(source, &available) == MA_SUCCESS;
-					const bool ended = ma_sound_get_cursor_in_pcm_frames(&slot.Sound, &cursor) == MA_SUCCESS &&
-						ma_sound_get_length_in_pcm_frames(&slot.Sound, &length) == MA_SUCCESS && length > 0 && cursor + 64 >= length;
-					const bool starved = known && available == 0 && !ended;
-
-					if (starved && !slot.Starved)
-					{
-						streamStarved.fetch_add(1, std::memory_order_relaxed);
-					}
-
-					slot.Starved = starved;
-				}
-
-				if (slot.Markers.empty())
-				{
-					continue;
-				}
-
-				float cursor = 0.0f;
-
-				if (ma_sound_get_cursor_in_seconds(&slot.Sound, &cursor) != MA_SUCCESS)
-				{
-					continue;
-				}
-
-				if (cursor + 0.001f < slot.LastCursor)
-				{
-					slot.NextMarker = 0; // Looped.
-				}
-
-				while (slot.NextMarker < slot.Markers.size() && slot.Markers[slot.NextMarker] <= cursor)
-				{
-					eventQueue.Push({ EventType::Marker, i, slot.Generation, slot.NextMarker++ });
-				}
-
-				slot.LastCursor = cursor;
-			}
-		}
-
-		void ThreadMain()
-		{
-			using Clock = std::chrono::steady_clock;
-			auto last = Clock::now();
-			auto lastRetry = last;
-
-			while (running.load(std::memory_order_acquire))
-			{
-				Command command;
-
-				while (commandQueue.Pop(command))
-				{
-					Execute(command);
-				}
-
-				const auto now = Clock::now();
-
-				if (output == AudioOutput::Null)
-				{
-					// Advance the mix in real time so voices end and markers pass without a device.
-					const auto frames = static_cast<std::uint64_t>(std::chrono::duration<double>(now - last).count() * sampleRate.load());
-					nullScratch.resize(std::size_t(std::min<std::uint64_t>(frames, 48000)) * desc.Channels);
-
-					if (frames > 0)
-					{
-						ma_engine_read_pcm_frames(&engine, nullScratch.data(), std::min<std::uint64_t>(frames, 48000), nullptr);
-					}
-				}
-				else if (deviceLost.load() && now - lastRetry > std::chrono::seconds(1))
-				{
-					lastRetry = now;
-
-					if (OpenDevice(wantedDevice) || OpenDevice({}))
-					{
-						deviceLost.store(false);
-						std::cerr << "[Audio] Output device reopened: " << deviceName << '\n';
-					}
-				}
-
-				last = now;
-				Poll();
-				std::this_thread::sleep_for(std::chrono::milliseconds(2));
-			}
-		}
-#endif
-
-		void Send(Command command)
-		{
-			if (output != AudioOutput::Off)
-			{
-				commandQueue.Push(std::move(command));
-			}
-		}
-
-		std::uint32_t CountedVoices() const
-		{
-			std::uint32_t count = 0;
-
-			for (const auto& voice : voices)
-			{
-				count += voice.Counted ? 1u : 0u;
-			}
-
-			return count;
-		}
-
-		void StopSlot(std::uint32_t index, float fadeSeconds)
-		{
-			auto& voice = voices[index];
-
-			if (!voice.Active)
-			{
-				return;
-			}
-
-			voice.Counted = false;
-			Command command;
-			command.Type = CommandType::Stop;
-			command.Slot = index;
-			command.Generation = voice.Generation;
-			command.Seconds = fadeSeconds;
-			Send(std::move(command));
-		}
-
-		Voice* Find(VoiceHandle handle)
-		{
-			if (handle.Index >= MaxSlots)
-			{
-				return nullptr;
-			}
-
-			auto& voice = voices[handle.Index];
-			return voice.Active && voice.Generation == handle.Generation ? &voice : nullptr;
-		}
-	};
-
 	AudioSystem::AudioSystem(const AudioSystemDesc& desc, Swim::Commands::CommandRegistry* commands) : impl(std::make_unique<Impl>())
 	{
 		auto& I = *impl;
@@ -911,70 +92,9 @@ namespace Engine
 			AddBus(name, AudioBus::Master);
 		}
 
-		// The master bus volume variable (the bus itself exists from the start).
 		if (commands)
 		{
-			I.buses[0].Variable = &commands->AddFloat("audio_volume_master", 0.5, 0.0, 1.0, "Master volume", Category,
-				Swim::Commands::VariableFlags::Saved);
-			I.buses[0].Variable->Subscribe(
-				[this](const Swim::Commands::ConsoleVariable& variable)
-				{
-					SetBusVolume(AudioBus::Master, variable.GetFloat());
-				});
-			SetBusVolume(AudioBus::Master, I.buses[0].Variable->GetFloat());
-			I.device->Subscribe(
-				[this](const Swim::Commands::ConsoleVariable& variable)
-				{
-					SetDevice(variable.GetString());
-				});
-			commands->Register({ "audio_devices", "Lists the audio output devices", Category, "" },
-				[this](const std::vector<std::string>&)
-				{
-					const auto names = ListDevices();
-					std::cout << "[Audio] " << names.size() << " output device(s); current: " << GetStats().Device << '\n';
-
-					for (const auto& name : names)
-					{
-						std::cout << "  " << name << '\n';
-					}
-				});
-			commands->Register({ "audio_stats", "Prints voice, sound and device statistics", Category, "" },
-				[this](const std::vector<std::string>&)
-				{
-					const auto stats = GetStats();
-					std::cout << "[Audio] voices " << stats.Voices << "/" << stats.MaxVoices << ", sounds " << stats.Sounds << ", groups "
-							  << stats.Groups << ", played " << stats.Played << ", stolen " << stats.Stolen << ", refused " << stats.Refused
-							  << ", device " << stats.Device << " @ " << stats.SampleRate << " Hz, glitches: callback overruns "
-							  << stats.CallbackOverruns << ", late callbacks " << stats.CallbackLate << ", starved streams " << stats.StreamStarved
-							  << '\n';
-				});
-			commands->Register({ "audio_play", "Plays a sound file or group by name (2D, ui bus)", Category, "<path|group> [volume]" },
-				[this](const std::vector<std::string>& arguments)
-				{
-					if (arguments.empty())
-					{
-						return;
-					}
-
-					const float volume = arguments.size() > 1 ? std::strtof(arguments[1].c_str(), nullptr) : 1.0f;
-
-					if (HasGroup(arguments[0]))
-					{
-						SoundEventParams params;
-						params.Volume = volume;
-						PlayGroup(arguments[0], params);
-						return;
-					}
-
-					PlayParams params;
-					params.Bus = AudioBus::Ui;
-					params.Volume = volume;
-
-					if (!Play(arguments[0], params))
-					{
-						std::cerr << "[Audio] Could not play " << arguments[0] << '\n';
-					}
-				});
+			RegisterCommands(*commands);
 		}
 
 #if SWIM_AUDIO_MINIAUDIO
@@ -984,6 +104,74 @@ namespace Engine
 			I.thread = std::thread([&I] { I.ThreadMain(); });
 		}
 #endif
+	}
+
+	// The master bus volume variable (the bus itself exists from the start), the device
+	// subscription and the audio console commands.
+	void AudioSystem::RegisterCommands(Swim::Commands::CommandRegistry& commands)
+	{
+		auto& I = *impl;
+		I.buses[0].Variable =
+			&commands.AddFloat("audio_volume_master", 0.5, 0.0, 1.0, "Master volume", Category, Swim::Commands::VariableFlags::Saved);
+		I.buses[0].Variable->Subscribe(
+			[this](const Swim::Commands::ConsoleVariable& variable)
+			{
+				SetBusVolume(AudioBus::Master, variable.GetFloat());
+			});
+		SetBusVolume(AudioBus::Master, I.buses[0].Variable->GetFloat());
+		I.device->Subscribe(
+			[this](const Swim::Commands::ConsoleVariable& variable)
+			{
+				SetDevice(variable.GetString());
+			});
+		commands.Register({ "audio_devices", "Lists the audio output devices", Category, "" },
+			[this](const std::vector<std::string>&)
+			{
+				const auto names = ListDevices();
+				std::cout << "[Audio] " << names.size() << " output device(s); current: " << GetStats().Device << '\n';
+
+				for (const auto& name : names)
+				{
+					std::cout << "  " << name << '\n';
+				}
+			});
+		commands.Register({ "audio_stats", "Prints voice, sound and device statistics", Category, "" },
+			[this](const std::vector<std::string>&)
+			{
+				const auto stats = GetStats();
+				std::cout << "[Audio] voices " << stats.Voices << "/" << stats.MaxVoices << ", sounds " << stats.Sounds << ", groups "
+						  << stats.Groups << ", played " << stats.Played << ", stolen " << stats.Stolen << ", refused " << stats.Refused
+						  << ", device " << stats.Device << " @ " << stats.SampleRate << " Hz, glitches: callback overruns "
+						  << stats.CallbackOverruns << ", late callbacks " << stats.CallbackLate << ", starved streams "
+						  << stats.StreamStarved << '\n';
+			});
+		commands.Register({ "audio_play", "Plays a sound file or group by name (2D, ui bus)", Category, "<path|group> [volume]" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.empty())
+				{
+					return;
+				}
+
+				const float volume = arguments.size() > 1 ? std::strtof(arguments[1].c_str(), nullptr) : 1.0f;
+
+				if (HasGroup(arguments[0]))
+				{
+					SoundEventParams params;
+					params.Volume = volume;
+					PlayGroup(arguments[0], params);
+					return;
+				}
+
+				PlayParams params;
+				params.Bus = AudioBus::Ui;
+				params.Volume = volume;
+
+				if (!Play(arguments[0], params))
+				{
+					std::cerr << "[Audio] Could not play " << arguments[0] << '\n';
+				}
+			});
 	}
 
 	AudioSystem::~AudioSystem()

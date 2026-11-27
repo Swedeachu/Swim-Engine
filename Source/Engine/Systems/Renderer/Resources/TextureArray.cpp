@@ -107,7 +107,8 @@ namespace Swim::Render
 			return ::Engine::LinearToSrgb8(value);
 		}
 
-		std::vector<std::byte> Downsample(const std::vector<std::byte>& source, std::uint32_t width, std::uint32_t height, bool srgb)
+		std::vector<std::byte> Downsample(
+			const std::vector<std::byte>& source, std::uint32_t width, std::uint32_t height, bool srgb, bool maximumAlpha = false)
 		{
 			const auto outWidth = std::max(width / 2, 1u);
 			const auto outHeight = std::max(height / 2, 1u);
@@ -130,6 +131,7 @@ namespace Swim::Render
 					float colour[3] = {};
 					float plain[3] = {};
 					float alpha = 0.0f;
+					float largest = 0.0f;
 
 					for (const auto row : rows)
 					{
@@ -146,6 +148,7 @@ namespace Swim::Render
 							}
 
 							alpha += a;
+							largest = std::max(largest, a);
 						}
 					}
 
@@ -153,11 +156,11 @@ namespace Swim::Render
 
 					for (int c = 0; c < 3; ++c)
 					{
-						const float value = srgb && alpha > 0.0f ? colour[c] / alpha : plain[c] * 0.25f;
+						const float value = (srgb || maximumAlpha) && alpha > 0.0f ? colour[c] / alpha : plain[c] * 0.25f;
 						out[c] = srgb ? LinearToSrgb(value) : static_cast<std::uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
 					}
 
-					out[3] = static_cast<std::uint8_t>(std::clamp(alpha * 0.25f, 0.0f, 1.0f) * 255.0f + 0.5f);
+					out[3] = static_cast<std::uint8_t>(std::clamp(maximumAlpha ? largest : alpha * 0.25f, 0.0f, 1.0f) * 255.0f + 0.5f);
 				}
 			}
 
@@ -410,20 +413,27 @@ namespace Swim::Render
 			}
 
 			const std::size_t given = data.Mips.size();
+			const bool maximum = data.AlphaMips == AlphaMipFilter::Maximum;
 
 			while (data.Mips.size() < mipLevels)
 			{
 				const auto mip = static_cast<std::uint32_t>(data.Mips.size()) - 1;
-				data.Mips.push_back(Downsample(data.Mips[mip], MipExtent(desc.Width, mip), MipExtent(desc.Height, mip), IsSrgb(desc.Format)));
+				data.Mips.push_back(
+					Downsample(data.Mips[mip], MipExtent(desc.Width, mip), MipExtent(desc.Height, mip), IsSrgb(desc.Format), maximum));
 			}
 
-			if (desc.AlphaCoverageCutoff > 0.0f && given < data.Mips.size())
+			const float cutoff = data.AlphaMips == AlphaMipFilter::Array ? desc.AlphaCoverageCutoff
+				: data.AlphaMips == AlphaMipFilter::Coverage ? (data.AlphaCutoff > 0.0f ? data.AlphaCutoff : desc.AlphaCoverageCutoff)
+															 : 0.0f;
+
+			if (cutoff > 0.0f && given < data.Mips.size())
 			{
-				const float coverage = ::Engine::AlphaCoverage(data.Mips[0], desc.AlphaCoverageCutoff);
+				const float scale = data.AlphaMips == AlphaMipFilter::Coverage ? std::clamp(data.CoverageScale, 0.0f, 1.0f) : 1.0f;
+				const float coverage = ::Engine::AlphaCoverage(data.Mips[0], cutoff) * scale;
 
 				for (std::size_t mip = given; mip < data.Mips.size(); ++mip)
 				{
-					::Engine::PreserveAlphaCoverage(data.Mips[mip], desc.AlphaCoverageCutoff, coverage);
+					::Engine::PreserveAlphaCoverage(data.Mips[mip], cutoff, coverage);
 				}
 			}
 
@@ -979,6 +989,11 @@ namespace Swim::Render
 				});
 			graph.Export(imported, S::ShaderRead);
 			initialized = true;
+			graph.OnAbandoned(
+				[this]
+				{
+					initialized = false;
+				});
 		}
 
 		struct Copy
@@ -992,6 +1007,16 @@ namespace Swim::Render
 		auto copies = std::make_shared<std::vector<Copy>>();
 		std::uint64_t staged = 0;
 		stats.UploadedBytes = 0;
+
+		// The layers the uploads below take, as they were, to put back if the graph never runs.
+		struct Taken
+		{
+			std::uint32_t Index = 0;
+			Layer Before;
+			bool Dequeued = false;
+		};
+
+		auto taken = std::make_shared<std::vector<Taken>>();
 
 		while (!uploads.empty())
 		{
@@ -1010,6 +1035,8 @@ namespace Swim::Render
 				break;
 			}
 
+			taken->push_back({ layer, slot, false });
+
 			for (auto mip = slot.NextMip; mip-- > last;)
 			{
 				const auto size = slot.Pending->Mips[mip].size();
@@ -1026,12 +1053,75 @@ namespace Swim::Render
 				slot.HasImage = !slot.PendingPlaceholder;
 				slot.Whole = false;
 				slot.Pending.reset();
+				taken->back().Dequeued = true;
 				uploads.pop_front();
 			}
 		}
 
+		if (!taken->empty())
+		{
+			graph.OnAbandoned(
+				[this, taken]
+				{
+					for (auto entry = taken->rbegin(); entry != taken->rend(); ++entry)
+					{
+						auto& slot = layers[entry->Index];
+						slot.Pending = entry->Before.Pending;
+						slot.PendingPlaceholder = entry->Before.PendingPlaceholder;
+						slot.NextMip = entry->Before.NextMip;
+						slot.Whole = entry->Before.Whole;
+						slot.MinLod = entry->Before.MinLod;
+						slot.HasImage = entry->Before.HasImage;
+
+						if (entry->Dequeued)
+						{
+							uploads.push_front(entry->Index);
+						}
+					}
+				});
+		}
+
 		if (!copies->empty())
 		{
+			// The barriers cover only the layers the copies touch, as contiguous runs (or the
+			// whole array past a run limit). A debug layer checks each transitioned
+			// subresource against the texture's other subresources: two whole-array
+			// transitions of a 1435-layer, 5-mip array measured about 230 ms there, a few
+			// layers well under 1 ms. Without a debug layer the cost is the same either way.
+			std::vector<std::uint32_t> touched;
+			touched.reserve(copies->size());
+
+			for (const auto& copy : *copies)
+			{
+				touched.push_back(copy.Layer);
+			}
+
+			std::sort(touched.begin(), touched.end());
+			touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
+			std::vector<Rhi::TextureSubresourceRange> runs;
+
+			for (const auto layer : touched)
+			{
+				if (!runs.empty() && runs.back().BaseArrayLayer + runs.back().ArrayLayerCount == layer)
+				{
+					++runs.back().ArrayLayerCount;
+				}
+				else
+				{
+					Rhi::TextureSubresourceRange range;
+					range.BaseArrayLayer = layer;
+					range.ArrayLayerCount = 1;
+					runs.push_back(range);
+				}
+			}
+
+			constexpr std::size_t maxRuns = 64; // Declaring a use per run costs per covered cell.
+
+			if (runs.size() > maxRuns)
+			{
+				runs.assign(1, Rhi::TextureSubresourceRange{});
+			}
+
 			const std::string uploadName = desc.DebugName + " upload";
 			const auto staging = graph.CreateUpload({ staged, Rhi::BufferUsage::TransferSource, 16, uploadName },
 				[copies](std::span<std::byte> bytes)
@@ -1046,18 +1136,28 @@ namespace Swim::Render
 				uploadName, Rhi::QueueType::Transfer,
 				[&](RenderGraphBuilder& b)
 				{
-					// One use over the whole array: per-copy subresource uses cost O(n^2) to declare
-					// with thousands of copies in a pass. The transition keeps every layer's contents.
+					// One use per run of layers, not per copy: per-copy subresource uses cost O(n^2)
+					// to declare with thousands of copies in a pass. The transition keeps contents.
 					b.Read(staging, S::CopySource);
-					b.Write(imported, S::CopyDestination);
+
+					for (const auto& range : runs)
+					{
+						b.Write(imported, S::CopyDestination, range);
+					}
 				},
 				[imported, staging, copies, width = desc.Width, height = desc.Height](RenderCommandContext& c)
 				{
 					const auto source = c.GetRange(staging);
-					auto& target = c.Get(imported);
 
 					for (const auto& copy : *copies)
 					{
+						// Each copy asks for exactly its own subresource, which one declared run holds.
+						Rhi::TextureSubresourceRange cell;
+						cell.BaseMipLevel = copy.Mip;
+						cell.MipLevelCount = 1;
+						cell.BaseArrayLayer = copy.Layer;
+						cell.ArrayLayerCount = 1;
+						auto& target = c.Get(imported, cell);
 						c.Commands().CopyBufferToTexture(*source.Buffer, target,
 							{ source.Offset + copy.StagingOffset, { copy.Mip, copy.Layer }, {}, { MipExtent(width, copy.Mip), MipExtent(height, copy.Mip), 1 } });
 					}
@@ -1068,7 +1168,11 @@ namespace Swim::Render
 				desc.DebugName + " ready", Rhi::QueueType::Graphics,
 				[&](RenderGraphBuilder& b)
 				{
-					b.Read(imported, S::ShaderRead);
+					for (const auto& range : runs)
+					{
+						b.Read(imported, S::ShaderRead, range);
+					}
+
 					b.SideEffect();
 				},
 				[](RenderCommandContext&)

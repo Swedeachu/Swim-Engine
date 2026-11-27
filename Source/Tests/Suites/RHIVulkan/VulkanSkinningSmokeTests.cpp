@@ -7,6 +7,7 @@
 #include "Engine/Systems/Renderer/Skinning/SkinningSystem.h"
 #include "Tests/Fixtures/SkinningFixture.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_SKINNING_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_SKY_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_DOWNSAMPLE_SPIRV_PATH) &&    \
@@ -77,9 +78,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Skinning smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const auto program = Smoke::MakeCompute(*device, SWIM_SKINNING_SPIRV_PATH, SWIM_SKINNING_REFLECTION_PATH, "Skinning");
@@ -338,11 +337,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuSkinningMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunSkinningSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunSkinningSmoke>("GpuSkinningMatchesTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

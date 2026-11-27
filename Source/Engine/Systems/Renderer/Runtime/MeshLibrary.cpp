@@ -500,7 +500,7 @@ namespace Engine
 		++meshesVersion;
 	}
 
-	std::vector<MeshLibrary::PageSlot> MeshLibrary::CollectPageSlots(bool* conflict) const
+	const std::vector<MeshLibrary::PageSlot>& MeshLibrary::CollectPageSlots(bool* conflict) const
 	{
 		// Builtins are fixed; meshes map to GPU meshes only through heap creation/destruction.
 		if (pageSlotsKey[0] == meshesVersion && pageSlotsKey[1] == heap.GetGeneration())
@@ -536,25 +536,41 @@ namespace Engine
 
 			slots.push_back({ metadata->IndexPage, metadata->VertexPage });
 		};
-		// Deterministic order: builtins first, then the rest by path.
-		std::vector<std::string> paths;
-
-		for (const auto& [path, handle] : meshes)
+		// Deterministic order: builtins first, then the rest by path (sorted again only when
+		// the meshes change, not on every heap change).
+		if (sortedMeshesVersion != meshesVersion)
 		{
-			(void)handle;
-			paths.push_back(path);
-		}
+			std::vector<std::pair<const std::string*, MeshHandle>> byPath;
+			byPath.reserve(meshes.size());
 
-		std::sort(paths.begin(), paths.end());
+			for (const auto& [path, handle] : meshes)
+			{
+				byPath.emplace_back(&path, handle);
+			}
+
+			std::sort(byPath.begin(), byPath.end(),
+				[](const auto& a, const auto& b)
+				{
+					return *a.first < *b.first;
+				});
+			sortedMeshes.clear();
+
+			for (const auto& entry : byPath)
+			{
+				sortedMeshes.push_back(entry.second);
+			}
+
+			sortedMeshesVersion = meshesVersion;
+		}
 
 		for (const auto& handle : builtins)
 		{
 			add(residency.GetGpuMesh(handle));
 		}
 
-		for (const auto& path : paths)
+		for (const auto& handle : sortedMeshes)
 		{
-			add(residency.GetGpuMesh(meshes.at(path)));
+			add(residency.GetGpuMesh(handle));
 		}
 
 		for (const auto mesh : extraMeshes)
@@ -569,9 +585,9 @@ namespace Engine
 
 		pageSlotsKey[0] = meshesVersion;
 		pageSlotsKey[1] = heap.GetGeneration();
-		pageSlots = slots;
+		pageSlots = std::move(slots);
 		pageSlotsConflict = clash;
-		return slots;
+		return pageSlots;
 	}
 
 } // namespace Engine

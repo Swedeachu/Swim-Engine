@@ -4,6 +4,7 @@
 // screen-space quad around one sphere; the fragment derives the exact sphere normal
 // from its pixel center, so the CPU reference (the native gallery smoke) computes
 // the identical inputs for every pixel. Linear HDR output.
+#include "Resources/DrawIndex.slang"
 #include "Environment/EnvironmentLighting.slang"
 
 struct GalleryView
@@ -41,8 +42,10 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instance : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint instanceInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint instance = DrawInstanceIndex(instanceInput);
 	const float2 corners[6] = { float2(-1, -1), float2(1, -1), float2(1, 1), float2(-1, -1), float2(1, 1), float2(-1, 1) };
 	const GalleryView view = Views[0];
 	const GallerySphere sphere = Spheres[instance];

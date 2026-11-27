@@ -129,7 +129,7 @@ namespace Engine
 		std::unique_ptr<Swim::Rhi::Texture> weatherTexture;
 		bool baked = false;
 		const void* bakedWith = nullptr;
-		const Swim::Render::RenderGraph* noiseGraph = nullptr;
+		std::uint64_t noiseGraph = 0; // RenderGraph::GetId of the graph noise was imported into.
 		std::uint32_t noiseFrame = ~0u;
 		std::optional<Noise> noise;
 

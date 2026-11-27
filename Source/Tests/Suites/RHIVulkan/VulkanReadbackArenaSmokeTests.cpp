@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #include <array>
@@ -16,9 +17,7 @@ namespace
 		using namespace Swim;
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Readback arena smoke requires a working SDL desktop video driver");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		std::array<std::unique_ptr<Rhi::ReadbackArena>, 2> arenas;
@@ -122,8 +121,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ReadbackArenaBufferTextureAndRetainedResults",
-				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunReadbackArenaSmoke); } });
+			Swim::Testing::AddSmoke<&RunReadbackArenaSmoke>("ReadbackArenaBufferTextureAndRetainedResults", SWIM_TEST_LOCATION);
 		}
 
 		return true;

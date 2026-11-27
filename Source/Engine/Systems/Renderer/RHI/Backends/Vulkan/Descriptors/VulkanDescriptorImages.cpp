@@ -48,7 +48,7 @@ namespace Swim::RhiVulkan
 		else if (binding.Type == Rhi::DescriptorType::SampledTexture)
 		{
 			if (view.GetNativeHandle() == 0 || !HasTextureUsage(desc.Usage, Rhi::TextureUsage::Sampled) ||
-				desc.Samples != Rhi::SampleCount::X1 || viewDesc.Dimension != binding.SampledDimension ||
+				(desc.Samples != Rhi::SampleCount::X1) != binding.Multisampled || viewDesc.Dimension != binding.SampledDimension ||
 				!ValidateVulkanTextureView(desc, viewDesc, state->Device.physical_device.features.imageCubeArray != VK_FALSE) ||
 				(depth ? (aspect != VK_IMAGE_ASPECT_DEPTH_BIT || binding.SampledClass != Rhi::SampledTextureClass::Float)
 					   : (Rhi::GetSampledTextureClass(format) == Rhi::SampledTextureClass::Undefined ||
@@ -61,7 +61,7 @@ namespace Swim::RhiVulkan
 			required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 			// Preserve the floating/normalized filtering contract. Integer texel loads
 			// do not use a sampler and must not require linear filtering support.
-			if (!depth && binding.SampledClass == Rhi::SampledTextureClass::Float)
+			if (!depth && !binding.Multisampled && binding.SampledClass == Rhi::SampledTextureClass::Float)
 			{
 				required |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
 			}

@@ -6,6 +6,18 @@
 [[vk::binding(2, 0)]] StructuredBuffer<ScreenSpaceParams> Params;
 [[vk::binding(3, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> Output;
 
+// The view distance of the surface at (x, y), from the depth or the AO linear depth.
+float SurfaceDistance(ScreenSpaceView view, int x, int y, out bool valid)
+{
+	if ((Params[0].AoHalf & 2u) != 0u)
+	{
+		const float d = Depth.Load(int3(x, y, 0));
+		valid = d != 0.0;
+		return abs(d);
+	}
+	return -ScreenSpaceLoadViewPosition(view, Depth, x, y, valid).z;
+}
+
 float Finish(float value, float power)
 {
 	return pow(clamp(value, 0.0, 1.0), power);
@@ -19,12 +31,11 @@ float HalfBlur(ScreenSpaceView view, int x, int y)
 	const int2 centre = int2(x, y) / 2;
 	const int2 offset = int2(ScreenSpaceHalfOffset(Params[0].NoiseFrame));
 	bool valid;
-	const float3 position = ScreenSpaceLoadViewPosition(view, Depth, x, y, valid);
+	const float centerDepth = SurfaceDistance(view, x, y, valid);
 	if (!valid)
 	{
 		return Source.Load(int3(centre, 0));
 	}
-	const float centerDepth = -position.z;
 	const float tolerance = Params[0].AoBlurDepthTolerance * abs(centerDepth);
 	float sum = 0.0;
 	float weights = 0.0;
@@ -39,12 +50,12 @@ float HalfBlur(ScreenSpaceView view, int x, int y)
 			}
 			const int2 source = min(texel * 2 + offset, int2(int(view.Width), int(view.Height)) - 1);
 			bool sampleValid;
-			const float3 samplePosition = ScreenSpaceLoadViewPosition(view, Depth, source.x, source.y, sampleValid);
+			const float sampleDepth = SurfaceDistance(view, source.x, source.y, sampleValid);
 			if (!sampleValid)
 			{
 				continue;
 			}
-			const float weight = max(0.0, 1.0 - abs(-samplePosition.z - centerDepth) / tolerance);
+			const float weight = max(0.0, 1.0 - abs(sampleDepth - centerDepth) / tolerance);
 			sum += weight * Source.Load(int3(texel, 0));
 			weights += weight;
 		}
@@ -64,19 +75,18 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float power = Params[0].AoPower;
 	const int x = int(id.x);
 	const int y = int(id.y);
-	if (Params[0].AoHalf != 0u)
+	if ((Params[0].AoHalf & 1u) != 0u)
 	{
 		Output[id.xy] = Finish(HalfBlur(view, x, y), power);
 		return;
 	}
 	bool valid;
-	const float3 center = ScreenSpaceLoadViewPosition(view, Depth, x, y, valid);
+	const float centerDepth = SurfaceDistance(view, x, y, valid);
 	if (!valid)
 	{
 		Output[id.xy] = Finish(Source.Load(int3(x, y, 0)), power);
 		return;
 	}
-	const float centerDepth = -center.z;
 	const float tolerance = Params[0].AoBlurDepthTolerance * abs(centerDepth);
 	float sum = 0.0;
 	float weights = 0.0;
@@ -91,12 +101,12 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 				continue;
 			}
 			bool sampleValid;
-			const float3 position = ScreenSpaceLoadViewPosition(view, Depth, sx, sy, sampleValid);
+			const float sampleDepth = SurfaceDistance(view, sx, sy, sampleValid);
 			if (!sampleValid)
 			{
 				continue;
 			}
-			const float weight = max(0.0, 1.0 - abs(-position.z - centerDepth) / tolerance);
+			const float weight = max(0.0, 1.0 - abs(sampleDepth - centerDepth) / tolerance);
 			sum += weight * Source.Load(int3(sx, sy, 0));
 			weights += weight;
 		}

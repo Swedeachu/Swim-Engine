@@ -39,6 +39,9 @@ namespace Swim::RhiVulkan
 			VkPhysicalDeviceFeatures blockCompression{};
 			blockCompression.textureCompressionBC = VK_TRUE;
 			info.Capabilities.BcTextureCompression = this->physicalDevice.enable_features_if_present(blockCompression);
+			VkPhysicalDeviceFeatures extendedStorage{};
+			extendedStorage.shaderStorageImageExtendedFormats = VK_TRUE;
+			info.Capabilities.StorageImageExtendedFormats = this->physicalDevice.enable_features_if_present(extendedStorage);
 			// Bindless tables are rewritten while earlier frames are still pending, which
 			// needs update-unused-while-pending on top of the required indexing features.
 			VkPhysicalDeviceVulkan12Features bindlessFeatures{};
@@ -88,6 +91,18 @@ namespace Swim::RhiVulkan
 			auto faultFeatures = QueryDeviceFaultFeatures(instance->Dispatch, selectedDevice.physical_device,
 				HasExtension(extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME), instance->RequestDeviceFaultDiagnostics);
 			const bool faultEnabled = faultFeatures.deviceFault != VK_FALSE;
+			const char* statisticsMode = std::getenv("SWIM_PIPELINE_STATS");
+			const bool statisticsEnabled = statisticsMode && std::string_view(statisticsMode) == "1" &&
+				HasExtension(extensions, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+			VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR statisticsFeatures{
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR
+			};
+			statisticsFeatures.pipelineExecutableInfo = VK_TRUE;
+
+			if (statisticsEnabled)
+			{
+				selectedDevice.enable_extension_if_present(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+			}
 
 			if (faultEnabled)
 			{
@@ -100,6 +115,11 @@ namespace Swim::RhiVulkan
 			if (faultEnabled)
 			{
 				builder.add_pNext(&faultFeatures);
+			}
+
+			if (statisticsEnabled)
+			{
+				builder.add_pNext(&statisticsFeatures);
 			}
 
 			auto deviceResult = builder.build();
@@ -123,6 +143,7 @@ namespace Swim::RhiVulkan
 			auto deviceState = std::make_shared<VulkanDeviceState>();
 			deviceState->Instance = instance;
 			deviceState->DeviceFaultEnabled = faultEnabled;
+			deviceState->PipelineStatisticsEnabled = statisticsEnabled;
 			deviceState->Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>(faultEnabled);
 			deviceState->Device = std::move(deviceResult).value();
 			deviceState->QueueFamilies = queueFamilies;
@@ -225,6 +246,9 @@ namespace Swim::RhiVulkan
 				deviceState, Rhi::QueueType::Compute, computeQueueHandle, queueFamilies.Compute, computeQueueMutex);
 			auto transferQueue = std::make_unique<VulkanQueue>(
 				deviceState, Rhi::QueueType::Transfer, transferQueueHandle, queueFamilies.Transfer, transferQueueMutex);
+			graphicsQueue->EnableProgress();
+			computeQueue->EnableProgress();
+			transferQueue->EnableProgress();
 
 			return std::make_unique<VulkanDevice>(
 				std::move(deviceState), info, std::move(graphicsQueue), std::move(computeQueue), std::move(transferQueue));

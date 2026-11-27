@@ -85,7 +85,11 @@ namespace Engine
 
 		void SetTextureResolver(TextureResolver resolver) { textureResolver = std::move(resolver); }
 
-		// Returns the material set index (the GPU Scene's MaterialSet).
+		// Returns the material set index (the GPU Scene's MaterialSet). When the material table
+		// has no free row, returns GetDefault() instead and logs one warning per library
+		// (GetExhaustedCount counts them). Release ignores the default; a caller that Updates
+		// the set it got should compare it with GetDefault() first, or it restyles the default.
+		// Throws only when the default itself (the first Create) cannot be created.
 		std::uint32_t Create(const MaterialDesc& desc);
 
 		// The set named desc.Name when one exists (scenes re-run Init on reload), else Create.
@@ -106,6 +110,13 @@ namespace Engine
 		std::uint32_t GetSamplerIndex(bool pointSampled) const { return pointSampled ? pointSampler : sampler; }
 
 		std::uint32_t GetCount() const { return static_cast<std::uint32_t>(entries.size()); }
+
+		// Material rows the table holds in total (the fallback row included); Create returns
+		// the default once GetCount() plus retiring rows reach it.
+		std::uint32_t GetCapacity() const;
+
+		// Create calls that returned the default because the table was full.
+		std::uint64_t GetExhaustedCount() const { return exhausted; }
 
 		// Resolves textures that became resident since the last call.
 		void Update();
@@ -133,7 +144,7 @@ namespace Engine
 		TextureResolver textureResolver;
 		std::unordered_map<std::uint32_t, Entry> entries;
 		std::uint32_t defaultSet = 0;
-
+		std::uint64_t exhausted = 0;
 	};
 
 } // namespace Engine

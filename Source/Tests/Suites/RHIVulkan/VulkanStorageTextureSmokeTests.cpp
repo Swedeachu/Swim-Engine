@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_STORAGE_TEXTURE_SPIRV_PATH
@@ -26,7 +27,7 @@ namespace
 		using namespace Swim;
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_STORAGE_TEXTURE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_STORAGE_TEXTURE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
 		SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), 1u);
@@ -34,7 +35,7 @@ namespace
 		SWIM_REQUIRE((interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ 8, 8, 1 }));
 		SWIM_REQUIRE_EQUAL(interface.PushConstants.size(), 1u);
 		SWIM_REQUIRE_EQUAL(interface.PushConstants[0].Size, 24u);
-		std::ifstream file(SWIM_RHI_STORAGE_TEXTURE_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_STORAGE_TEXTURE_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -44,14 +45,12 @@ namespace
 		SWIM_REQUIRE(file);
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Storage texture smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
-		auto program = device->CreateShaderProgram({ { &stage, 1 },
-			{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "Storage texture smoke" });
+		auto program =
+			device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(interface), "Storage texture smoke" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "Storage texture layout" });
 		SWIM_REQUIRE(layout);
@@ -198,8 +197,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TypedStorageTexturesAndSubresourceReadback",
-				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunStorageTextureSmoke); } });
+			Swim::Testing::AddSmoke<&RunStorageTextureSmoke>("TypedStorageTexturesAndSubresourceReadback", SWIM_TEST_LOCATION);
 		}
 
 		return true;

@@ -42,6 +42,11 @@ namespace Engine
 
 	void Camera::SetYawPitch(float yawDegrees, float pitchDegrees)
 	{
+		if (!std::isfinite(yawDegrees) || !std::isfinite(pitchDegrees))
+		{
+			return; // Keep the last good rotation.
+		}
+
 		yaw = yawDegrees;
 		pitch = std::clamp(pitchDegrees, -89.9f, 89.9f);
 		const glm::quat yawRotation = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));

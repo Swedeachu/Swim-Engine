@@ -223,12 +223,12 @@ namespace Engine
 	{
 		auto& graph = context.Graph();
 
-		if (noiseGraph == &graph && noiseFrame == context.View().Frame)
+		if (noiseGraph == graph.GetId() && noiseFrame == context.View().Frame)
 		{
 			return noise;
 		}
 
-		noiseGraph = &graph;
+		noiseGraph = graph.GetId();
 		noiseFrame = context.View().Frame;
 		noise.reset();
 		auto* device = context.Device();
@@ -272,6 +272,11 @@ namespace Engine
 				.Dispatch(AtlasWidth, AtlasHeight + WeatherSize);
 			baked = true;
 			bakedWith = bakeProgram;
+			graph.OnAbandoned(
+				[this]
+				{
+					baked = false;
+				});
 		}
 
 		graph.Export(imported.Shape, Swim::Rhi::ResourceState::ShaderRead);
@@ -361,6 +366,13 @@ namespace Engine
 			}
 
 			graph.Export(next, Swim::Rhi::ResourceState::ShaderRead);
+			graph.OnAbandoned(
+				[this, w = historyWritten, i = historyIndex, f = historyFrame]
+				{
+					historyWritten = w;
+					historyIndex = i;
+					historyFrame = f;
+				});
 			historyWritten[historyIndex ^ 1u] = true;
 			historyIndex ^= 1u;
 			historyFrame = view.Frame;

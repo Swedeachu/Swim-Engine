@@ -121,6 +121,20 @@ namespace Swim::Assets
 			return std::max<std::uint32_t>(value, 1);
 		}
 
+		// The level-index entry of one mip and its dimensions.
+		TextureMipDesc ReadLevel(std::span<const std::byte> bytes, const Ktx2Metadata& metadata, std::size_t level)
+		{
+			const std::size_t offset = HeaderSize + level * LevelIndexSize;
+			TextureMipDesc mip;
+			mip.Width = MipDimension(metadata.Width, level);
+			mip.Height = MipDimension(metadata.Height, level);
+			mip.Depth = MipDimension(metadata.Depth, level);
+			mip.OffsetBytes = ReadU64(bytes, offset + 0);
+			mip.SizeBytes = ReadU64(bytes, offset + 8);
+			mip.UncompressedSizeBytes = ReadU64(bytes, offset + 16);
+			return mip;
+		}
+
 		bool RangeFits(std::uint64_t offset, std::uint64_t size, std::size_t totalSize)
 		{
 			if (offset > static_cast<std::uint64_t>(totalSize))
@@ -216,14 +230,7 @@ namespace Swim::Assets
 
 		for (std::size_t level = 0; level < levelCount; ++level)
 		{
-			const std::size_t offset = HeaderSize + level * LevelIndexSize;
-			TextureMipDesc mip;
-			mip.Width = MipDimension(metadata.Width, level);
-			mip.Height = MipDimension(metadata.Height, level);
-			mip.Depth = MipDimension(metadata.Depth, level);
-			mip.OffsetBytes = ReadU64(bytes, offset + 0);
-			mip.SizeBytes = ReadU64(bytes, offset + 8);
-			mip.UncompressedSizeBytes = ReadU64(bytes, offset + 16);
+			const TextureMipDesc mip = ReadLevel(bytes, metadata, level);
 
 			if (!RangeFits(mip.OffsetBytes, mip.SizeBytes, bytes.size()))
 			{

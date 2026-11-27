@@ -6,6 +6,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_GPU_LIGHT_PROBE_SPIRV_PATH
@@ -62,9 +63,9 @@ namespace
 
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_GPU_LIGHT_PROBE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_GPU_LIGHT_PROBE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
-		std::ifstream file(SWIM_RHI_GPU_LIGHT_PROBE_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_GPU_LIGHT_PROBE_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytes(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -73,16 +74,13 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "GPU light smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const auto& programInterface = converted.Interface;
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytes };
-		auto program = device->CreateShaderProgram({ { &stage, 1 },
-			{ programInterface.DescriptorSchemas, programInterface.PushConstants, programInterface.ComputeThreadGroupSize },
-			"GPU light probe" });
+		auto program =
+			device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(programInterface), "GPU light probe" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "GPU light probe" });
 		SWIM_REQUIRE(layout);
@@ -289,11 +287,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuLightBufferMatchesBruteForceShading", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunGpuLightSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunGpuLightSmoke>("GpuLightBufferMatchesBruteForceShading", SWIM_TEST_LOCATION);
 		}
 
 		return true;

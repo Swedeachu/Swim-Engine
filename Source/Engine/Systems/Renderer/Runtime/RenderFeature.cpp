@@ -104,6 +104,12 @@ namespace Engine
 		return *this;
 	}
 
+	RenderFeatureComputePass& RenderFeatureComputePass::ReadWriteStorage(std::string_view name, R::GraphTexture texture)
+	{
+		bindings.push_back({ std::string(name), Kind::ReadWriteStorage, texture, {}, {} });
+		return *this;
+	}
+
 	RenderFeatureComputePass& RenderFeatureComputePass::Buffer(std::string_view name, R::GraphBuffer buffer)
 	{
 		bindings.push_back({ std::string(name), Kind::Buffer, {}, buffer, {} });
@@ -156,7 +162,7 @@ namespace Engine
 			}
 
 			const bool compatible = (slot.Type == Type::SampledTexture && found->Type == Kind::Texture) ||
-				(slot.Type == Type::StorageTexture && found->Type == Kind::Storage) ||
+				(slot.Type == Type::StorageTexture && (found->Type == Kind::Storage || found->Type == Kind::ReadWriteStorage)) ||
 				(slot.Type == Type::ReadOnlyStorageBuffer && found->Type == Kind::Buffer) ||
 				(slot.Type == Type::StorageBuffer &&
 					(found->Type == Kind::StorageBuffer || found->Type == Kind::Buffer || found->Type == Kind::WriteBuffer)) ||
@@ -221,11 +227,12 @@ namespace Engine
 			{
 			case Kind::Texture:
 			case Kind::Storage:
+			case Kind::ReadWriteStorage:
 			{
 				const auto format = graph.GetDesc(resource->TextureHandle).PixelFormat;
 				const bool isDepth = format == S::Format::D32Float;
 
-				if (resource->Type == Kind::Storage && slot->StorageFormat != S::Format::Undefined && slot->StorageFormat != format)
+				if (resource->Type != Kind::Texture && slot->StorageFormat != S::Format::Undefined && slot->StorageFormat != format)
 				{
 					throw std::invalid_argument(
 						label + ": storage image '" + slot->Name + "' has a different format than the shader declares");
@@ -265,6 +272,9 @@ namespace Engine
 						break;
 					case Kind::Storage:
 						b.Write(resource.TextureHandle, S::ResourceState::ShaderWrite);
+						break;
+					case Kind::ReadWriteStorage:
+						b.ReadWrite(resource.TextureHandle, S::ResourceState::ShaderWrite);
 						break;
 					case Kind::Buffer:
 						b.Read(resource.BufferHandle, S::ResourceState::ShaderRead);
@@ -355,7 +365,8 @@ namespace Engine
 			throw std::logic_error("RenderFeatureDrawContext has no pipeline cache");
 		}
 
-		const auto pipeline = services.GetGeometryPipeline(name, draw.Pass, draw.DepthPrepassed && !state.SkipsPrepass, state);
+		const auto pipeline =
+			services.GetGeometryPipeline(name, draw.Pass, draw.DepthPrepassed && !state.SkipsPrepass, state, draw.Samples);
 
 		if (!pipeline.Pipeline || !pipeline.Program)
 		{

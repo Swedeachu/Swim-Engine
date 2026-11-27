@@ -30,6 +30,8 @@ namespace Engine
 		Swim::Platform::Window* Window = nullptr;
 		std::uint32_t Width = 1280; // Headless size, and the initial size of a window.
 		std::uint32_t Height = 720;
+		// The backend to render with; Vulkan when it is not built in or fails to start.
+		Swim::Rhi::GraphicsApi Api = Swim::Rhi::GraphicsApi::Vulkan;
 		bool VSync = false;
 		bool Validation = false;
 		// Frames the CPU may record ahead of the GPU (1 or 2). With 2, frame N+1 is built
@@ -77,7 +79,7 @@ namespace Engine
 	};
 
 	// The GPU the engine renders with (Phase 23): the RHI graphics system and device
-	// (Vulkan), the render-graph executor every subsystem records into, and, with a
+	// (RenderDeviceDesc::Api), the render-graph executor every subsystem records into, and, with a
 	// window, the swapchain with its per-image present semaphores. Acquire / Present /
 	// Resize follow the RHI swapchain contract: an out-of-date or suspended swapchain
 	// skips the frame and is rebuilt at the next Acquire.

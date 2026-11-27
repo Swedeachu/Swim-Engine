@@ -1,4 +1,5 @@
 // Game::WaterDemo: one quad of water in the transparent pass, shaded by Water/WaterShading.slang.
+#include "Resources/DrawIndex.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 #include "Water/WaterShading.slang"
 
@@ -21,8 +22,9 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	const float2 quad[6] = { float2(-1, -1), float2(1, -1), float2(1, 1), float2(-1, -1), float2(1, 1), float2(-1, 1) };
 	const float2 corner = quad[vertexId] * Constants.Size.xy;
 	const float3 world = Constants.Center.xyz + float3(corner.x, 0.0, corner.y);

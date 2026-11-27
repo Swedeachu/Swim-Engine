@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace Engine
@@ -16,6 +17,10 @@ namespace Engine
 		std::filesystem::path Compiler;	 // The pinned slangc (DevPaths.cfg SlangCompiler).
 		std::filesystem::path Sources;	 // The runtime shader source manifest (DevPaths.cfg ShaderSources).
 		std::filesystem::path CacheRoot; // Compiled artifacts, by content hash.
+		// Set for a backend that runs DXIL (DevPaths.cfg DxcDirectory): reloads also build the
+		// program's DXIL and register reflection, as the build does.
+		std::filesystem::path DxcDirectory;
+		std::string DxilProfile = "sm_6_8"; // DevPaths.cfg DxilProfile.
 	};
 
 	// Development shader hot reload. A worker thread watches every runtime program's source

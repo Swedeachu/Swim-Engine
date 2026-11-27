@@ -552,37 +552,66 @@ namespace Swim::AssetCompiler
 			return dependencies;
 		}
 
-	} // namespace
-
-	Swim::Assets::ContentHash GetStaticModelCompilerProfileHash()
-	{
-		return Swim::Assets::ComputeContentHash(
-			"SwimStaticModelCompiler:v2;sasset=1;fastgltf=0.9.0;draco=1.5.7;meshoptimizer=1.1;"
-			"mesh=float32-interleaved-v1;skin=u16x4-f32x4-sorted-v1;morph=dense-v1;skeleton=parents-first-v1;animation=v1;"
-			"texture=ktx2-or-bc7-mips-v5;basisu=1.60-bc7;bc7=uastc-faster");
-	}
-
-	StaticModelCompileResult StaticModelCompiler::Compile(const IntermediateModel& model, std::string_view sourceLogicalPath,
-		std::vector<Swim::Assets::SassetSourceDependency> sourceDependencies) const
-	{
-		StaticModelCompileResult result;
-
-		try
+		// A model the compiler rejects: Compile reports it with this code.
+		struct CompileFailure
 		{
-			result.RootLogicalPath = MakeRootLogicalPath(sourceLogicalPath);
-			const Swim::Assets::ContentHash compilerHash = GetStaticModelCompilerProfileHash();
-			const Swim::Assets::ContentHash sourceHash = ComputeSourceGraphHash(sourceDependencies);
+			StaticModelCompileErrorCode Code;
+			std::string Message;
+		};
 
-			Swim::Assets::AssetSystem ids;
+		// One Compile call: the asset identities and the handles each stage hands the next.
+		class ModelCompilation
+		{
 
-			if (!ids.Initialize())
+		  public:
+			ModelCompilation(const IntermediateModel& source, const std::vector<Swim::Assets::SassetSourceDependency>& dependencies,
+				StaticModelCompileResult& output)
+				: model(source), sourceDependencies(dependencies), result(output), compilerHash(GetStaticModelCompilerProfileHash()),
+				  sourceHash(ComputeSourceGraphHash(dependencies))
 			{
-				return MakeError(
-					StaticModelCompileErrorCode::InvalidSourceData, "could not initialize compiler-side asset identity context");
 			}
 
-			auto emit = [&](Swim::Assets::SassetAssetType type, Swim::Assets::AssetId id, std::string logicalPath,
-							std::vector<Swim::Assets::AssetId> dependencies, std::vector<std::byte> payload, bool isRoot)
+			void Run()
+			{
+				if (!ids.Initialize())
+				{
+					throw CompileFailure{ StaticModelCompileErrorCode::InvalidSourceData,
+						"could not initialize compiler-side asset identity context" };
+				}
+
+				CompileSamplers();
+				CompileMaterials();
+				nodeNames = UniqueNodeNames(model);
+				CompileSkeletons();
+				AssignMeshSkins();
+				meshHandles.resize(model.Meshes.size());
+				meshMaterialSlots.resize(model.Meshes.size());
+
+				for (std::size_t meshIndex = 0; meshIndex < model.Meshes.size(); ++meshIndex)
+				{
+					CompileMesh(meshIndex);
+				}
+
+				std::vector<Swim::Assets::AssetId> modelDependencies;
+				Swim::Assets::ModelAsset modelAsset = BuildModelNodes(modelDependencies);
+				CompileAnimations(modelAsset, modelDependencies);
+				modelAsset.Skeletons = skeletonHandles;
+
+				for (const auto& skeleton : skeletonHandles)
+				{
+					modelDependencies.push_back(skeleton.GetId());
+				}
+
+				const auto rootHandle = ids.Declare<Swim::Assets::ModelAsset>(result.RootLogicalPath);
+				result.RootId = rootHandle.GetId();
+				Emit(Swim::Assets::SassetAssetType::Model, rootHandle.GetId(), result.RootLogicalPath, std::move(modelDependencies),
+					SerializeAssetPayload(modelAsset), true);
+				ids.Shutdown();
+			}
+
+		  private:
+			void Emit(Swim::Assets::SassetAssetType type, Swim::Assets::AssetId id, std::string logicalPath,
+				std::vector<Swim::Assets::AssetId> dependencies, std::vector<std::byte> payload, bool isRoot)
 			{
 				SassetBuildInput input;
 				input.Type = type;
@@ -601,36 +630,38 @@ namespace Swim::AssetCompiler
 				}
 
 				result.Assets.push_back(CompiledSasset{ id, type, std::move(input.LogicalPath), std::move(built.Bytes), isRoot });
-			};
+			}
 
-			std::vector<Swim::Assets::AssetHandle<Swim::Assets::SamplerAsset>> samplerHandles(model.Samplers.size());
-
-			for (std::size_t index = 0; index < model.Samplers.size(); ++index)
+			void CompileSamplers()
 			{
-				const std::string path = ChildPath(result.RootLogicalPath, "sampler", index);
-				const auto handle = ids.Declare<Swim::Assets::SamplerAsset>(path);
-				samplerHandles[index] = handle;
-				const SourceSampler& source = model.Samplers[index];
-				Swim::Assets::SamplerAsset asset;
-				asset.MinFilter = ConvertMinFilter(source.MinFilter);
-				asset.MagFilter = ConvertMagFilter(source.MagFilter);
-				asset.MipFilter = ConvertMipFilter(source.MinFilter);
-				asset.AddressU = ConvertWrap(source.WrapU);
-				asset.AddressV = ConvertWrap(source.WrapV);
-				emit(Swim::Assets::SassetAssetType::Sampler, handle.GetId(), path, {}, SerializeAssetPayload(asset), false);
+				samplerHandles.resize(model.Samplers.size());
+
+				for (std::size_t index = 0; index < model.Samplers.size(); ++index)
+				{
+					const std::string path = ChildPath(result.RootLogicalPath, "sampler", index);
+					const auto handle = ids.Declare<Swim::Assets::SamplerAsset>(path);
+					samplerHandles[index] = handle;
+					const SourceSampler& source = model.Samplers[index];
+					Swim::Assets::SamplerAsset asset;
+					asset.MinFilter = ConvertMinFilter(source.MinFilter);
+					asset.MagFilter = ConvertMagFilter(source.MagFilter);
+					asset.MipFilter = ConvertMipFilter(source.MinFilter);
+					asset.AddressU = ConvertWrap(source.WrapU);
+					asset.AddressV = ConvertWrap(source.WrapV);
+					Emit(Swim::Assets::SassetAssetType::Sampler, handle.GetId(), path, {}, SerializeAssetPayload(asset), false);
+					++result.Stats.Samplers;
+				}
+
+				const std::string defaultSamplerPath = std::string(result.RootLogicalPath) + "#sampler/default";
+				defaultSampler = ids.Declare<Swim::Assets::SamplerAsset>(defaultSamplerPath);
+				Swim::Assets::SamplerAsset defaultSamplerAsset;
+				Emit(Swim::Assets::SassetAssetType::Sampler, defaultSampler.GetId(), defaultSamplerPath, {},
+					SerializeAssetPayload(defaultSamplerAsset), false);
 				++result.Stats.Samplers;
 			}
 
-			const std::string defaultSamplerPath = std::string(result.RootLogicalPath) + "#sampler/default";
-			const auto defaultSampler = ids.Declare<Swim::Assets::SamplerAsset>(defaultSamplerPath);
-			Swim::Assets::SamplerAsset defaultSamplerAsset;
-			emit(Swim::Assets::SassetAssetType::Sampler, defaultSampler.GetId(), defaultSamplerPath, {},
-				SerializeAssetPayload(defaultSamplerAsset), false);
-			++result.Stats.Samplers;
-
-			std::unordered_map<TextureKey, Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>, TextureKeyHash> textureHandles;
-			auto resolveTexture = [&](std::uint32_t textureIndex, Swim::Assets::TextureColorSpace colorSpace,
-									  Swim::Assets::TextureSemantic semantic) -> Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>
+			Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> ResolveTexture(
+				std::uint32_t textureIndex, Swim::Assets::TextureColorSpace colorSpace, Swim::Assets::TextureSemantic semantic)
 			{
 				const TextureKey key{ textureIndex, colorSpace, semantic };
 
@@ -690,112 +721,117 @@ namespace Swim::AssetCompiler
 
 				const std::string path = ChildPath(result.RootLogicalPath, "texture", textureHandles.size());
 				const auto handle = ids.Declare<Swim::Assets::TextureAsset>(path);
-				emit(Swim::Assets::SassetAssetType::Texture, handle.GetId(), path, {}, SerializeAssetPayload(textureAsset), false);
+				Emit(Swim::Assets::SassetAssetType::Texture, handle.GetId(), path, {}, SerializeAssetPayload(textureAsset), false);
 				textureHandles.emplace(key, handle);
 				++result.Stats.Textures;
 				return handle;
-			};
-
-			std::vector<Swim::Assets::AssetHandle<Swim::Assets::MaterialInstanceAsset>> materialHandles(model.Materials.size());
-
-			for (std::size_t index = 0; index < model.Materials.size(); ++index)
-			{
-				const SourceMaterial& source = model.Materials[index];
-				const std::string templatePath = ChildPath(result.RootLogicalPath, "material-template", index);
-				const auto templateHandle = ids.Declare<Swim::Assets::MaterialTemplateAsset>(templatePath);
-				const auto templateAsset = BuildMaterialTemplate(source);
-				emit(Swim::Assets::SassetAssetType::MaterialTemplate, templateHandle.GetId(), templatePath, {},
-					SerializeAssetPayload(templateAsset), false);
-
-				const std::string materialPath = ChildPath(result.RootLogicalPath, "material", index);
-				const auto materialHandle = ids.Declare<Swim::Assets::MaterialInstanceAsset>(materialPath);
-				materialHandles[index] = materialHandle;
-				auto materialAsset = BuildMaterialInstance(source, templateHandle);
-				std::vector<Swim::Assets::AssetId> dependencies{ templateHandle.GetId() };
-
-				auto bindTexture = [&](const char* name, const std::optional<std::uint32_t>& textureIndex,
-									   Swim::Assets::TextureColorSpace colorSpace, Swim::Assets::TextureSemantic semantic)
-				{
-					if (!textureIndex.has_value())
-					{
-						return;
-					}
-
-					const auto textureHandle = resolveTexture(*textureIndex, colorSpace, semantic);
-					const SourceTexture& sourceTexture = model.Textures[*textureIndex];
-					auto samplerHandle = defaultSampler;
-
-					if (sourceTexture.SamplerIndex.has_value())
-					{
-						if (*sourceTexture.SamplerIndex >= samplerHandles.size())
-						{
-							throw std::runtime_error("glTF texture references a sampler outside the sampler table");
-						}
-
-						samplerHandle = samplerHandles[*sourceTexture.SamplerIndex];
-					}
-
-					materialAsset.Textures.push_back({ name, textureHandle, samplerHandle });
-					dependencies.push_back(textureHandle.GetId());
-					dependencies.push_back(samplerHandle.GetId());
-				};
-
-				bindTexture("BaseColorTexture", source.BaseColorTexture, Swim::Assets::TextureColorSpace::SRgb,
-					Swim::Assets::TextureSemantic::Color);
-				bindTexture("MetallicRoughnessTexture", source.MetallicRoughnessTexture, Swim::Assets::TextureColorSpace::Linear,
-					Swim::Assets::TextureSemantic::Data);
-				bindTexture(
-					"NormalTexture", source.NormalTexture, Swim::Assets::TextureColorSpace::Linear, Swim::Assets::TextureSemantic::Normal);
-				bindTexture("OcclusionTexture", source.OcclusionTexture, Swim::Assets::TextureColorSpace::Linear,
-					Swim::Assets::TextureSemantic::Data);
-				bindTexture(
-					"EmissiveTexture", source.EmissiveTexture, Swim::Assets::TextureColorSpace::SRgb, Swim::Assets::TextureSemantic::Color);
-
-				emit(Swim::Assets::SassetAssetType::MaterialInstance, materialHandle.GetId(), materialPath, std::move(dependencies),
-					SerializeAssetPayload(materialAsset), false);
-				++result.Stats.Materials;
 			}
 
-			const std::vector<std::string> nodeNames = UniqueNodeNames(model);
-			std::vector<Swim::Assets::AssetHandle<Swim::Assets::SkeletonAsset>> skeletonHandles(model.Skins.size());
-			std::vector<std::vector<std::uint16_t>> skinRemaps(model.Skins.size());
-
-			for (std::size_t skinIndex = 0; skinIndex < model.Skins.size(); ++skinIndex)
+			void CompileMaterials()
 			{
-				SkeletonLayout layout = BuildSkeleton(model, model.Skins[skinIndex], nodeNames);
-				skinRemaps[skinIndex] = std::move(layout.Remap);
-				const std::string path = ChildPath(result.RootLogicalPath, "skeleton", skinIndex);
-				const auto handle = ids.Declare<Swim::Assets::SkeletonAsset>(path);
-				skeletonHandles[skinIndex] = handle;
-				emit(Swim::Assets::SassetAssetType::Skeleton, handle.GetId(), path, {}, SerializeAssetPayload(layout.Asset), false);
-				++result.Stats.Skeletons;
+				materialHandles.resize(model.Materials.size());
+
+				for (std::size_t index = 0; index < model.Materials.size(); ++index)
+				{
+					const SourceMaterial& source = model.Materials[index];
+					const std::string templatePath = ChildPath(result.RootLogicalPath, "material-template", index);
+					const auto templateHandle = ids.Declare<Swim::Assets::MaterialTemplateAsset>(templatePath);
+					const auto templateAsset = BuildMaterialTemplate(source);
+					Emit(Swim::Assets::SassetAssetType::MaterialTemplate, templateHandle.GetId(), templatePath, {},
+						SerializeAssetPayload(templateAsset), false);
+
+					const std::string materialPath = ChildPath(result.RootLogicalPath, "material", index);
+					const auto materialHandle = ids.Declare<Swim::Assets::MaterialInstanceAsset>(materialPath);
+					materialHandles[index] = materialHandle;
+					auto materialAsset = BuildMaterialInstance(source, templateHandle);
+					std::vector<Swim::Assets::AssetId> dependencies{ templateHandle.GetId() };
+
+					auto bindTexture = [&](const char* name, const std::optional<std::uint32_t>& textureIndex,
+										   Swim::Assets::TextureColorSpace colorSpace, Swim::Assets::TextureSemantic semantic)
+					{
+						if (!textureIndex.has_value())
+						{
+							return;
+						}
+
+						const auto textureHandle = ResolveTexture(*textureIndex, colorSpace, semantic);
+						const SourceTexture& sourceTexture = model.Textures[*textureIndex];
+						auto samplerHandle = defaultSampler;
+
+						if (sourceTexture.SamplerIndex.has_value())
+						{
+							if (*sourceTexture.SamplerIndex >= samplerHandles.size())
+							{
+								throw std::runtime_error("glTF texture references a sampler outside the sampler table");
+							}
+
+							samplerHandle = samplerHandles[*sourceTexture.SamplerIndex];
+						}
+
+						materialAsset.Textures.push_back({ name, textureHandle, samplerHandle });
+						dependencies.push_back(textureHandle.GetId());
+						dependencies.push_back(samplerHandle.GetId());
+					};
+
+					bindTexture("BaseColorTexture", source.BaseColorTexture, Swim::Assets::TextureColorSpace::SRgb,
+						Swim::Assets::TextureSemantic::Color);
+					bindTexture("MetallicRoughnessTexture", source.MetallicRoughnessTexture, Swim::Assets::TextureColorSpace::Linear,
+						Swim::Assets::TextureSemantic::Data);
+					bindTexture("NormalTexture", source.NormalTexture, Swim::Assets::TextureColorSpace::Linear,
+						Swim::Assets::TextureSemantic::Normal);
+					bindTexture("OcclusionTexture", source.OcclusionTexture, Swim::Assets::TextureColorSpace::Linear,
+						Swim::Assets::TextureSemantic::Data);
+					bindTexture("EmissiveTexture", source.EmissiveTexture, Swim::Assets::TextureColorSpace::SRgb,
+						Swim::Assets::TextureSemantic::Color);
+
+					Emit(Swim::Assets::SassetAssetType::MaterialInstance, materialHandle.GetId(), materialPath, std::move(dependencies),
+						SerializeAssetPayload(materialAsset), false);
+					++result.Stats.Materials;
+				}
+			}
+
+			void CompileSkeletons()
+			{
+				skeletonHandles.resize(model.Skins.size());
+				skinRemaps.resize(model.Skins.size());
+
+				for (std::size_t skinIndex = 0; skinIndex < model.Skins.size(); ++skinIndex)
+				{
+					SkeletonLayout layout = BuildSkeleton(model, model.Skins[skinIndex], nodeNames);
+					skinRemaps[skinIndex] = std::move(layout.Remap);
+					const std::string path = ChildPath(result.RootLogicalPath, "skeleton", skinIndex);
+					const auto handle = ids.Declare<Swim::Assets::SkeletonAsset>(path);
+					skeletonHandles[skinIndex] = handle;
+					Emit(Swim::Assets::SassetAssetType::Skeleton, handle.GetId(), path, {}, SerializeAssetPayload(layout.Asset), false);
+					++result.Stats.Skeletons;
+				}
 			}
 
 			// The skin a mesh's joint indices address (one per mesh: its remap is baked in).
-			std::vector<std::optional<std::uint32_t>> meshSkins(model.Meshes.size());
-
-			for (const SourceNode& node : model.Nodes)
+			void AssignMeshSkins()
 			{
-				if (!node.MeshIndex.has_value() || !node.SkinIndex.has_value() || *node.MeshIndex >= model.Meshes.size())
+				meshSkins.resize(model.Meshes.size());
+
+				for (const SourceNode& node : model.Nodes)
 				{
-					continue;
+					if (!node.MeshIndex.has_value() || !node.SkinIndex.has_value() || *node.MeshIndex >= model.Meshes.size())
+					{
+						continue;
+					}
+
+					auto& skin = meshSkins[*node.MeshIndex];
+
+					if (skin.has_value() && *skin != *node.SkinIndex && skinRemaps[*skin] != skinRemaps[*node.SkinIndex])
+					{
+						throw CompileFailure{ StaticModelCompileErrorCode::InvalidSourceData,
+							"a mesh is instanced with two skins whose joint orders differ; split the mesh per skin" };
+					}
+
+					skin = *node.SkinIndex;
 				}
-
-				auto& skin = meshSkins[*node.MeshIndex];
-
-				if (skin.has_value() && *skin != *node.SkinIndex && skinRemaps[*skin] != skinRemaps[*node.SkinIndex])
-				{
-					return MakeError(StaticModelCompileErrorCode::InvalidSourceData,
-						"a mesh is instanced with two skins whose joint orders differ; split the mesh per skin");
-				}
-
-				skin = *node.SkinIndex;
 			}
 
-			std::vector<Swim::Assets::AssetHandle<Swim::Assets::MeshAsset>> meshHandles(model.Meshes.size());
-			std::vector<std::vector<std::optional<std::uint32_t>>> meshMaterialSlots(model.Meshes.size());
-
-			for (std::size_t meshIndex = 0; meshIndex < model.Meshes.size(); ++meshIndex)
+			void CompileMesh(std::size_t meshIndex)
 			{
 				const SourceMesh& sourceMesh = model.Meshes[meshIndex];
 				Swim::Assets::MeshAsset meshAsset;
@@ -829,6 +865,41 @@ namespace Swim::AssetCompiler
 				const std::vector<std::uint16_t>* remap = meshSkins[meshIndex].has_value() ? &skinRemaps[*meshSkins[meshIndex]] : nullptr;
 				const std::size_t jointCount = remap ? remap->size() : 65536u;
 				std::vector<std::byte> skinBytes;
+				PrepareMorphTargets(meshAsset, sourceMesh, targetCount, totalVertices);
+
+				std::vector<std::optional<std::uint32_t>>& slots = meshMaterialSlots[meshIndex];
+
+				for (const SourcePrimitive& primitive : sourceMesh.Primitives)
+				{
+					AppendPrimitive(meshAsset, primitive, skinned, remap, jointCount, skinBytes, slots);
+				}
+
+				meshAsset.VertexStreams.front().DataSizeBytes = meshAsset.VertexBytes.size();
+
+				if (skinned)
+				{
+					meshAsset.VertexStreams.push_back(
+						{ static_cast<std::uint32_t>(sizeof(PackedSkinVertex)), meshAsset.VertexBytes.size(), skinBytes.size() });
+					meshAsset.VertexAttributes.push_back({ Swim::Assets::VertexSemantic::Joints0,
+						Swim::Assets::VertexElementFormat::UInt16x4, 1, static_cast<std::uint32_t>(offsetof(PackedSkinVertex, Joints)) });
+					meshAsset.VertexAttributes.push_back({ Swim::Assets::VertexSemantic::Weights0,
+						Swim::Assets::VertexElementFormat::Float32x4, 1, static_cast<std::uint32_t>(offsetof(PackedSkinVertex, Weights)) });
+					meshAsset.VertexBytes.insert(meshAsset.VertexBytes.end(), skinBytes.begin(), skinBytes.end());
+					++result.Stats.SkinnedMeshes;
+				}
+
+				meshAsset.Lods.push_back({ 0, static_cast<std::uint32_t>(meshAsset.Primitives.size()), 1.0f });
+
+				const std::string path = ChildPath(result.RootLogicalPath, "mesh", meshIndex);
+				const auto handle = ids.Declare<Swim::Assets::MeshAsset>(path);
+				meshHandles[meshIndex] = handle;
+				Emit(Swim::Assets::SassetAssetType::Mesh, handle.GetId(), path, {}, SerializeAssetPayload(meshAsset), false);
+				++result.Stats.Meshes;
+			}
+
+			void PrepareMorphTargets(
+				Swim::Assets::MeshAsset& meshAsset, const SourceMesh& sourceMesh, std::size_t targetCount, std::size_t totalVertices)
+			{
 				meshAsset.MorphTargets.resize(targetCount);
 
 				for (std::size_t target = 0; target < targetCount; ++target)
@@ -873,235 +944,250 @@ namespace Swim::AssetCompiler
 
 					result.Stats.MorphTargets += targetCount;
 				}
-
-				std::vector<std::optional<std::uint32_t>>& slots = meshMaterialSlots[meshIndex];
-
-				for (const SourcePrimitive& primitive : sourceMesh.Primitives)
-				{
-					if (primitive.Topology != SourcePrimitiveTopology::Triangles)
-					{
-						return MakeError(StaticModelCompileErrorCode::UnsupportedTopology,
-							"static .sasset mesh v1 currently supports triangle primitives only");
-					}
-
-					if (primitive.Vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
-					{
-						return MakeError(StaticModelCompileErrorCode::Overflow, "mesh vertex count exceeds .sasset v1 vertex-offset range");
-					}
-
-					const std::size_t baseVertex = meshAsset.VertexBytes.size() / sizeof(PackedStaticVertex);
-					const std::size_t firstIndex = meshAsset.IndexBytes.size() / sizeof(std::uint32_t);
-
-					if (baseVertex > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
-						firstIndex > std::numeric_limits<std::uint32_t>::max() ||
-						primitive.Indices.size() > std::numeric_limits<std::uint32_t>::max())
-					{
-						return MakeError(StaticModelCompileErrorCode::Overflow, "mesh payload exceeds .sasset v1 index/vertex limits");
-					}
-
-					for (const SourceVertex& sourceVertex : primitive.Vertices)
-					{
-						PackedStaticVertex vertex;
-						vertex.Position = sourceVertex.Position;
-
-						if (sourceVertex.HasNormal)
-						{
-							vertex.Normal = sourceVertex.Normal;
-						}
-
-						if (sourceVertex.HasTangent)
-						{
-							vertex.Tangent = sourceVertex.Tangent;
-						}
-
-						if (sourceVertex.HasTexCoord0)
-						{
-							vertex.TexCoord0 = sourceVertex.TexCoord0;
-						}
-
-						AppendBytes(meshAsset.VertexBytes, &vertex, sizeof(vertex));
-
-						if (skinned)
-						{
-							PackedSkinVertex influences = PackInfluences(sourceVertex, jointCount);
-
-							if (remap)
-							{
-								for (auto& joint : influences.Joints)
-								{
-									joint = (*remap)[joint];
-								}
-							}
-
-							AppendBytes(skinBytes, &influences, sizeof(influences));
-						}
-					}
-
-					for (std::size_t target = 0; target < primitive.Targets.size(); ++target)
-					{
-						const SourceMorphTarget& source = primitive.Targets[target];
-						auto& out = meshAsset.MorphTargets[target];
-						const auto scatter = [&](const std::vector<std::array<float, 3>>& deltas, std::vector<float>& destination)
-						{
-							for (std::size_t v = 0; v < deltas.size(); ++v)
-							{
-								for (std::size_t c = 0; c < 3; ++c)
-								{
-									destination[(baseVertex + v) * 3 + c] = deltas[v][c];
-								}
-							}
-						};
-						scatter(source.Position, out.PositionDeltas);
-						scatter(source.Normal, out.NormalDeltas);
-						scatter(source.Tangent, out.TangentDeltas);
-					}
-
-					AppendBytes(meshAsset.IndexBytes, primitive.Indices.data(), primitive.Indices.size() * sizeof(std::uint32_t));
-
-					auto slotIt = std::find(slots.begin(), slots.end(), primitive.MaterialIndex);
-
-					if (slotIt == slots.end())
-					{
-						slots.push_back(primitive.MaterialIndex);
-						slotIt = std::prev(slots.end());
-					}
-
-					const std::uint32_t slot = static_cast<std::uint32_t>(std::distance(slots.begin(), slotIt));
-					meshAsset.Primitives.push_back(
-						{ static_cast<std::uint32_t>(firstIndex), static_cast<std::uint32_t>(primitive.Indices.size()),
-							static_cast<std::int32_t>(baseVertex), slot, primitive.Bounds });
-					ExpandBounds(meshAsset.Bounds, primitive.Bounds);
-				}
-
-				meshAsset.VertexStreams.front().DataSizeBytes = meshAsset.VertexBytes.size();
-
-				if (skinned)
-				{
-					meshAsset.VertexStreams.push_back(
-						{ static_cast<std::uint32_t>(sizeof(PackedSkinVertex)), meshAsset.VertexBytes.size(), skinBytes.size() });
-					meshAsset.VertexAttributes.push_back({ Swim::Assets::VertexSemantic::Joints0,
-						Swim::Assets::VertexElementFormat::UInt16x4, 1, static_cast<std::uint32_t>(offsetof(PackedSkinVertex, Joints)) });
-					meshAsset.VertexAttributes.push_back({ Swim::Assets::VertexSemantic::Weights0,
-						Swim::Assets::VertexElementFormat::Float32x4, 1, static_cast<std::uint32_t>(offsetof(PackedSkinVertex, Weights)) });
-					meshAsset.VertexBytes.insert(meshAsset.VertexBytes.end(), skinBytes.begin(), skinBytes.end());
-					++result.Stats.SkinnedMeshes;
-				}
-
-				meshAsset.Lods.push_back({ 0, static_cast<std::uint32_t>(meshAsset.Primitives.size()), 1.0f });
-
-				const std::string path = ChildPath(result.RootLogicalPath, "mesh", meshIndex);
-				const auto handle = ids.Declare<Swim::Assets::MeshAsset>(path);
-				meshHandles[meshIndex] = handle;
-				emit(Swim::Assets::SassetAssetType::Mesh, handle.GetId(), path, {}, SerializeAssetPayload(meshAsset), false);
-				++result.Stats.Meshes;
 			}
 
-			Swim::Assets::ModelAsset modelAsset;
-			modelAsset.Roots = model.Roots;
-			modelAsset.Nodes.resize(model.Nodes.size());
-			std::vector<Swim::Assets::AssetId> modelDependencies;
-
-			for (std::size_t nodeIndex = 0; nodeIndex < model.Nodes.size(); ++nodeIndex)
+			void AppendPrimitive(Swim::Assets::MeshAsset& meshAsset, const SourcePrimitive& primitive, bool skinned,
+				const std::vector<std::uint16_t>* remap, std::size_t jointCount, std::vector<std::byte>& skinBytes,
+				std::vector<std::optional<std::uint32_t>>& slots)
 			{
-				const SourceNode& sourceNode = model.Nodes[nodeIndex];
-				Swim::Assets::ModelNode& node = modelAsset.Nodes[nodeIndex];
-				node.Name = sourceNode.Name;
-				node.Parent = sourceNode.Parent;
-				node.LocalTransform = sourceNode.LocalTransform;
-				node.MorphWeights = sourceNode.Weights;
-
-				if (!sourceNode.MeshIndex.has_value())
+				if (primitive.Topology != SourcePrimitiveTopology::Triangles)
 				{
-					continue;
+					throw CompileFailure{ StaticModelCompileErrorCode::UnsupportedTopology,
+						"static .sasset mesh v1 currently supports triangle primitives only" };
 				}
 
-				if (sourceNode.SkinIndex.has_value())
+				if (primitive.Vertices.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
 				{
-					node.Skin = skeletonHandles[*sourceNode.SkinIndex];
-					modelDependencies.push_back(node.Skin.GetId());
+					throw CompileFailure{ StaticModelCompileErrorCode::Overflow,
+						"mesh vertex count exceeds .sasset v1 vertex-offset range" };
 				}
 
-				if (*sourceNode.MeshIndex >= meshHandles.size())
+				const std::size_t baseVertex = meshAsset.VertexBytes.size() / sizeof(PackedStaticVertex);
+				const std::size_t firstIndex = meshAsset.IndexBytes.size() / sizeof(std::uint32_t);
+
+				if (baseVertex > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
+					firstIndex > std::numeric_limits<std::uint32_t>::max() ||
+					primitive.Indices.size() > std::numeric_limits<std::uint32_t>::max())
 				{
-					return MakeError(StaticModelCompileErrorCode::InvalidSourceData, "model node references a mesh outside the mesh table");
+					throw CompileFailure{ StaticModelCompileErrorCode::Overflow, "mesh payload exceeds .sasset v1 index/vertex limits" };
 				}
 
-				node.Mesh = meshHandles[*sourceNode.MeshIndex];
-				modelDependencies.push_back(node.Mesh.GetId());
-
-				for (const std::optional<std::uint32_t> sourceMaterialIndex : meshMaterialSlots[*sourceNode.MeshIndex])
+				for (const SourceVertex& sourceVertex : primitive.Vertices)
 				{
-					if (!sourceMaterialIndex.has_value())
+					PackedStaticVertex vertex;
+					vertex.Position = sourceVertex.Position;
+
+					if (sourceVertex.HasNormal)
 					{
-						node.Materials.push_back({});
-						continue;
+						vertex.Normal = sourceVertex.Normal;
 					}
 
-					if (*sourceMaterialIndex >= materialHandles.size())
+					if (sourceVertex.HasTangent)
 					{
-						return MakeError(StaticModelCompileErrorCode::InvalidSourceData,
-							"mesh primitive references a material outside the material table");
+						vertex.Tangent = sourceVertex.Tangent;
 					}
 
-					node.Materials.push_back(materialHandles[*sourceMaterialIndex]);
-					modelDependencies.push_back(materialHandles[*sourceMaterialIndex].GetId());
+					if (sourceVertex.HasTexCoord0)
+					{
+						vertex.TexCoord0 = sourceVertex.TexCoord0;
+					}
+
+					AppendBytes(meshAsset.VertexBytes, &vertex, sizeof(vertex));
+
+					if (skinned)
+					{
+						PackedSkinVertex influences = PackInfluences(sourceVertex, jointCount);
+
+						if (remap)
+						{
+							for (auto& joint : influences.Joints)
+							{
+								joint = (*remap)[joint];
+							}
+						}
+
+						AppendBytes(skinBytes, &influences, sizeof(influences));
+					}
 				}
+
+				for (std::size_t target = 0; target < primitive.Targets.size(); ++target)
+				{
+					const SourceMorphTarget& source = primitive.Targets[target];
+					auto& out = meshAsset.MorphTargets[target];
+					const auto scatter = [&](const std::vector<std::array<float, 3>>& deltas, std::vector<float>& destination)
+					{
+						for (std::size_t v = 0; v < deltas.size(); ++v)
+						{
+							for (std::size_t c = 0; c < 3; ++c)
+							{
+								destination[(baseVertex + v) * 3 + c] = deltas[v][c];
+							}
+						}
+					};
+					scatter(source.Position, out.PositionDeltas);
+					scatter(source.Normal, out.NormalDeltas);
+					scatter(source.Tangent, out.TangentDeltas);
+				}
+
+				AppendBytes(meshAsset.IndexBytes, primitive.Indices.data(), primitive.Indices.size() * sizeof(std::uint32_t));
+
+				auto slotIt = std::find(slots.begin(), slots.end(), primitive.MaterialIndex);
+
+				if (slotIt == slots.end())
+				{
+					slots.push_back(primitive.MaterialIndex);
+					slotIt = std::prev(slots.end());
+				}
+
+				const std::uint32_t slot = static_cast<std::uint32_t>(std::distance(slots.begin(), slotIt));
+				meshAsset.Primitives.push_back({ static_cast<std::uint32_t>(firstIndex),
+					static_cast<std::uint32_t>(primitive.Indices.size()), static_cast<std::int32_t>(baseVertex), slot, primitive.Bounds });
+				ExpandBounds(meshAsset.Bounds, primitive.Bounds);
 			}
 
-			for (std::size_t animationIndex = 0; animationIndex < model.Animations.size(); ++animationIndex)
+			Swim::Assets::ModelAsset BuildModelNodes(std::vector<Swim::Assets::AssetId>& modelDependencies)
 			{
-				const SourceAnimation& source = model.Animations[animationIndex];
-				Swim::Assets::AnimationClipAsset clip;
-				clip.Name = source.Name.empty() ? "animation" + std::to_string(animationIndex) : source.Name;
+				Swim::Assets::ModelAsset modelAsset;
+				modelAsset.Roots = model.Roots;
+				modelAsset.Nodes.resize(model.Nodes.size());
 
-				for (const SourceAnimationChannel& channel : source.Channels)
+				for (std::size_t nodeIndex = 0; nodeIndex < model.Nodes.size(); ++nodeIndex)
 				{
-					if (channel.Node >= nodeNames.size() || channel.Times.empty())
+					const SourceNode& sourceNode = model.Nodes[nodeIndex];
+					Swim::Assets::ModelNode& node = modelAsset.Nodes[nodeIndex];
+					node.Name = sourceNode.Name;
+					node.Parent = sourceNode.Parent;
+					node.LocalTransform = sourceNode.LocalTransform;
+					node.MorphWeights = sourceNode.Weights;
+
+					if (!sourceNode.MeshIndex.has_value())
 					{
 						continue;
 					}
 
-					Swim::Assets::AnimationTrack track;
-					track.Target = nodeNames[channel.Node];
-					track.Path = channel.Path;
-					track.Interpolation = channel.Interpolation;
-					track.Components = channel.Components;
-					track.Times = channel.Times;
-					track.Values = channel.Values;
-
-					for (std::size_t key = 1; key < track.Times.size(); ++key)
+					if (sourceNode.SkinIndex.has_value())
 					{
-						if (!(track.Times[key] > track.Times[key - 1]))
-						{
-							return MakeError(
-								StaticModelCompileErrorCode::InvalidSourceData, "animation sampler times are not strictly increasing");
-						}
+						node.Skin = skeletonHandles[*sourceNode.SkinIndex];
+						modelDependencies.push_back(node.Skin.GetId());
 					}
 
-					clip.Duration = std::max(clip.Duration, track.Times.back());
-					clip.Tracks.push_back(std::move(track));
+					if (*sourceNode.MeshIndex >= meshHandles.size())
+					{
+						throw CompileFailure{ StaticModelCompileErrorCode::InvalidSourceData,
+							"model node references a mesh outside the mesh table" };
+					}
+
+					node.Mesh = meshHandles[*sourceNode.MeshIndex];
+					modelDependencies.push_back(node.Mesh.GetId());
+
+					for (const std::optional<std::uint32_t> sourceMaterialIndex : meshMaterialSlots[*sourceNode.MeshIndex])
+					{
+						if (!sourceMaterialIndex.has_value())
+						{
+							node.Materials.push_back({});
+							continue;
+						}
+
+						if (*sourceMaterialIndex >= materialHandles.size())
+						{
+							throw CompileFailure{ StaticModelCompileErrorCode::InvalidSourceData,
+								"mesh primitive references a material outside the material table" };
+						}
+
+						node.Materials.push_back(materialHandles[*sourceMaterialIndex]);
+						modelDependencies.push_back(materialHandles[*sourceMaterialIndex].GetId());
+					}
 				}
 
-				const std::string path = ChildPath(result.RootLogicalPath, "animation", animationIndex);
-				const auto handle = ids.Declare<Swim::Assets::AnimationClipAsset>(path);
-				modelAsset.Animations.push_back(handle);
-				modelDependencies.push_back(handle.GetId());
-				emit(Swim::Assets::SassetAssetType::AnimationClip, handle.GetId(), path, {}, SerializeAssetPayload(clip), false);
-				++result.Stats.Animations;
+				return modelAsset;
 			}
 
-			modelAsset.Skeletons = skeletonHandles;
-
-			for (const auto& skeleton : skeletonHandles)
+			void CompileAnimations(Swim::Assets::ModelAsset& modelAsset, std::vector<Swim::Assets::AssetId>& modelDependencies)
 			{
-				modelDependencies.push_back(skeleton.GetId());
+				for (std::size_t animationIndex = 0; animationIndex < model.Animations.size(); ++animationIndex)
+				{
+					const SourceAnimation& source = model.Animations[animationIndex];
+					Swim::Assets::AnimationClipAsset clip;
+					clip.Name = source.Name.empty() ? "animation" + std::to_string(animationIndex) : source.Name;
+
+					for (const SourceAnimationChannel& channel : source.Channels)
+					{
+						if (channel.Node >= nodeNames.size() || channel.Times.empty())
+						{
+							continue;
+						}
+
+						Swim::Assets::AnimationTrack track;
+						track.Target = nodeNames[channel.Node];
+						track.Path = channel.Path;
+						track.Interpolation = channel.Interpolation;
+						track.Components = channel.Components;
+						track.Times = channel.Times;
+						track.Values = channel.Values;
+
+						for (std::size_t key = 1; key < track.Times.size(); ++key)
+						{
+							if (!(track.Times[key] > track.Times[key - 1]))
+							{
+								throw CompileFailure{ StaticModelCompileErrorCode::InvalidSourceData,
+									"animation sampler times are not strictly increasing" };
+							}
+						}
+
+						clip.Duration = std::max(clip.Duration, track.Times.back());
+						clip.Tracks.push_back(std::move(track));
+					}
+
+					const std::string path = ChildPath(result.RootLogicalPath, "animation", animationIndex);
+					const auto handle = ids.Declare<Swim::Assets::AnimationClipAsset>(path);
+					modelAsset.Animations.push_back(handle);
+					modelDependencies.push_back(handle.GetId());
+					Emit(Swim::Assets::SassetAssetType::AnimationClip, handle.GetId(), path, {}, SerializeAssetPayload(clip), false);
+					++result.Stats.Animations;
+				}
 			}
 
-			const auto rootHandle = ids.Declare<Swim::Assets::ModelAsset>(result.RootLogicalPath);
-			result.RootId = rootHandle.GetId();
-			emit(Swim::Assets::SassetAssetType::Model, rootHandle.GetId(), result.RootLogicalPath, std::move(modelDependencies),
-				SerializeAssetPayload(modelAsset), true);
-			ids.Shutdown();
+			const IntermediateModel& model;
+			const std::vector<Swim::Assets::SassetSourceDependency>& sourceDependencies;
+			StaticModelCompileResult& result;
+			const Swim::Assets::ContentHash compilerHash;
+			const Swim::Assets::ContentHash sourceHash;
+			Swim::Assets::AssetSystem ids;
+			std::vector<Swim::Assets::AssetHandle<Swim::Assets::SamplerAsset>> samplerHandles;
+			Swim::Assets::AssetHandle<Swim::Assets::SamplerAsset> defaultSampler;
+			std::unordered_map<TextureKey, Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>, TextureKeyHash> textureHandles;
+			std::vector<Swim::Assets::AssetHandle<Swim::Assets::MaterialInstanceAsset>> materialHandles;
+			std::vector<std::string> nodeNames;
+			std::vector<Swim::Assets::AssetHandle<Swim::Assets::SkeletonAsset>> skeletonHandles;
+			std::vector<std::vector<std::uint16_t>> skinRemaps;
+			std::vector<std::optional<std::uint32_t>> meshSkins;
+			std::vector<Swim::Assets::AssetHandle<Swim::Assets::MeshAsset>> meshHandles;
+			std::vector<std::vector<std::optional<std::uint32_t>>> meshMaterialSlots;
+		};
+
+	} // namespace
+
+	Swim::Assets::ContentHash GetStaticModelCompilerProfileHash()
+	{
+		return Swim::Assets::ComputeContentHash(
+			"SwimStaticModelCompiler:v2;sasset=1;fastgltf=0.9.0;draco=1.5.7;meshoptimizer=1.1;"
+			"mesh=float32-interleaved-v1;skin=u16x4-f32x4-sorted-v1;morph=dense-v1;skeleton=parents-first-v1;animation=v1;"
+			"texture=ktx2-or-bc7-mips-v5;basisu=1.60-bc7;bc7=uastc-faster");
+	}
+
+	StaticModelCompileResult StaticModelCompiler::Compile(const IntermediateModel& model, std::string_view sourceLogicalPath,
+		std::vector<Swim::Assets::SassetSourceDependency> sourceDependencies) const
+	{
+		StaticModelCompileResult result;
+
+		try
+		{
+			result.RootLogicalPath = MakeRootLogicalPath(sourceLogicalPath);
+			ModelCompilation(model, sourceDependencies, result).Run();
+		}
+		catch (const CompileFailure& failure)
+		{
+			return MakeError(failure.Code, failure.Message);
 		}
 		catch (const std::overflow_error& error)
 		{

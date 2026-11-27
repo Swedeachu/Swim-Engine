@@ -75,6 +75,7 @@ namespace Swim::RhiVulkan
 		}
 
 		SetVulkanObjectName(*state, VK_OBJECT_TYPE_PIPELINE, ToNativeHandle(result->pipeline), desc.DebugName);
+		LogVulkanPipelineStatistics(*state, result->pipeline, desc.DebugName);
 		return result;
 	}
 

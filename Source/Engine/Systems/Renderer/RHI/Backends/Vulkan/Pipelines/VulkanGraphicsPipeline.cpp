@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 
 namespace Swim::RhiVulkan
@@ -43,9 +44,11 @@ namespace Swim::RhiVulkan
 			desc.ColorFormats.size() > limits.maxColorAttachments ||
 			(desc.ColorFormats.empty() && desc.DepthStencilFormat == Rhi::Format::Undefined) ||
 			(!desc.BlendAttachments.empty() && desc.BlendAttachments.size() != desc.ColorFormats.size()) ||
-			desc.Raster.DepthClamp || desc.Raster.Wireframe ||
+			desc.Raster.DepthClamp || desc.Raster.Wireframe || !std::isfinite(desc.Raster.DepthBiasConstant) ||
+			!std::isfinite(desc.Raster.DepthBiasSlope) ||
 			(desc.Samples != Rhi::SampleCount::X1 && desc.Samples != Rhi::SampleCount::X2 &&
-			 desc.Samples != Rhi::SampleCount::X4 && desc.Samples != Rhi::SampleCount::X8) ||
+			 desc.Samples != Rhi::SampleCount::X4 && desc.Samples != Rhi::SampleCount::X8 &&
+			 desc.Samples != Rhi::SampleCount::X16) ||
 			(desc.DepthStencilFormat != Rhi::Format::Undefined && !Rhi::IsDepthFormat(desc.DepthStencilFormat)) ||
 			(desc.DepthStencilFormat == Rhi::Format::Undefined && (desc.DepthStencil.DepthTest || desc.DepthStencil.DepthWrite)) ||
 			(desc.DepthStencil.StencilTest && !Rhi::HasStencil(desc.DepthStencilFormat)))
@@ -162,9 +165,13 @@ namespace Swim::RhiVulkan
 			raster.cullMode = ToVkCullMode(desc.Raster.Cull);
 			raster.frontFace = ToVkFrontFace(desc.Raster.Winding);
 			raster.lineWidth = 1.0f;
+			raster.depthBiasEnable = desc.Raster.DepthBiasConstant != 0.0f || desc.Raster.DepthBiasSlope != 0.0f ? VK_TRUE : VK_FALSE;
+			raster.depthBiasConstantFactor = desc.Raster.DepthBiasConstant;
+			raster.depthBiasSlopeFactor = desc.Raster.DepthBiasSlope;
 			VkPipelineMultisampleStateCreateInfo multisample{};
 			multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 			multisample.rasterizationSamples = nativeSamples;
+			multisample.alphaToCoverageEnable = desc.AlphaToCoverage && desc.Samples != Rhi::SampleCount::X1 ? VK_TRUE : VK_FALSE;
 			VkPipelineDepthStencilStateCreateInfo depth{};
 			depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 			depth.depthTestEnable = desc.DepthStencil.DepthTest;
@@ -218,6 +225,7 @@ namespace Swim::RhiVulkan
 			}
 
 			SetVulkanObjectName(*state, VK_OBJECT_TYPE_PIPELINE, ToNativeHandle(result->pipeline), desc.DebugName);
+			LogVulkanPipelineStatistics(*state, result->pipeline, desc.DebugName);
 			return result;
 		}
 		catch (const std::invalid_argument&)

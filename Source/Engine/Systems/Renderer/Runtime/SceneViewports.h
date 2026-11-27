@@ -36,7 +36,8 @@ namespace Engine
 	};
 
 	// One mesh of a viewport scene. Every submesh is drawn with the item's texture and tint
-	// (texels with alpha below AlphaCutoff are discarded; the rest are opaque).
+	// (texels with alpha below AlphaCutoff are discarded; the rest are opaque, or blended
+	// when the item is Translucent).
 	struct SceneViewportItem
 	{
 		Swim::Assets::AssetHandle<Swim::Assets::MeshAsset> Mesh;
@@ -47,6 +48,12 @@ namespace Engine
 		bool PointSampled = true;
 		// Lit by the scene's light; false draws the texture colour as is (flat icons).
 		bool Lit = true;
+		// Blended over what is behind it (premultiplied, with texture alpha times tint alpha),
+		// and that alpha goes into the region's alpha, so whatever the texture is shown over
+		// (a UI slot) shows through a tinted fill. Drawn after the scene's opaque items, back
+		// to front by origin, depth tested against them without writing depth. Only faces
+		// turned towards the camera are drawn, so a closed mesh shows its front alone.
+		bool Translucent = false;
 	};
 
 	// What one draw renders: a camera, one directional light and a few meshes, into a
@@ -106,6 +113,8 @@ namespace Engine
 		{
 			Swim::Rhi::GraphicsPipeline* Pipeline = nullptr;
 			Swim::Rhi::PipelineLayout* Layout = nullptr;
+			// TranslucentPipelineDesc; without it translucent items draw opaque.
+			Swim::Rhi::GraphicsPipeline* TranslucentPipeline = nullptr;
 		};
 
 		SceneViewports(Swim::Rhi::Device& device, Swim::Render::BindlessResourceTable& bindless);
@@ -120,7 +129,9 @@ namespace Engine
 		// when the bindless table is full and std::runtime_error when the texture fails.
 		SceneViewportHandle Create(const SceneViewportDesc& desc);
 
-		// Retires the texture after lastUse; queued draws are dropped.
+		// Retires the texture after lastUse; queued draws are dropped. Without a lastUse the
+		// texture and its bindless index wait for the next frame's completion (RetireAfter),
+		// since frames still in flight may sample it.
 		bool Destroy(SceneViewportHandle viewport, Swim::Rhi::TimelinePoint lastUse = {});
 
 		bool IsValid(SceneViewportHandle viewport) const;
@@ -144,6 +155,9 @@ namespace Engine
 
 		void CommitFrame();
 
+		// Every committed frame: viewports destroyed without a lastUse retire after completion.
+		void RetireAfter(const Swim::Rhi::TimelinePoint& completion);
+
 		void AbortFrame();
 
 		void Collect();
@@ -161,6 +175,10 @@ namespace Engine
 		void Drain();
 
 		static Swim::Rhi::GraphicsPipelineDesc PipelineDesc(Swim::Rhi::ShaderProgram& program, Swim::Rhi::PipelineLayout& layout);
+
+		// Translucent items: premultiplied over, depth tested, not written.
+		static Swim::Rhi::GraphicsPipelineDesc TranslucentPipelineDesc(
+			Swim::Rhi::ShaderProgram& program, Swim::Rhi::PipelineLayout& layout);
 
 	  private:
 

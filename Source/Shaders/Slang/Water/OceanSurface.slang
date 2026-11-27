@@ -2,6 +2,8 @@
 // displaced by the FFT cascades and shaded in the Forward+ opaque pass with the frame's
 // lights, shadows and image-based reflections. Quad spacing grows in proportion to the
 // distance from the centre: offset(u) = sign(u) * scale * (exp(rate * |u|) - 1) for u in -1..1.
+#include "Resources/DrawIndex.slang"
+#include "Resources/RowRecord.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 #include "ScreenSpace/DistanceFog.slang"
 #include "Water/WaterCommon.slang"
@@ -30,7 +32,7 @@ float3 OceanLodWeights(WaterLodFactorsGpu lod)
 	return lod.Amplitude * float3(1.0, lerp(1.0, lod.Detail, 0.5), lod.Detail);
 }
 
-[[vk::binding(0, 2)]] StructuredBuffer<OceanSurfaceParams> Params;
+[[vk::binding(0, 2)]] StructuredBuffer<RowRecord<17>> Params; // One OceanSurfaceParams, read with LoadRowRecord.
 [[vk::binding(1, 2)]] Texture2D<float4> Displacement0;
 [[vk::binding(2, 2)]] Texture2D<float4> Displacement1;
 [[vk::binding(3, 2)]] Texture2D<float4> Displacement2;
@@ -73,9 +75,10 @@ OceanCascades SurfaceCascades(OceanSurfaceParams p)
 }
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
-	const OceanSurfaceParams p = Params[0];
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const OceanSurfaceParams p = LoadRowRecord<OceanSurfaceParams>(Params, 0);
 	const uint quads = uint(p.GridShape.x);
 	const uint corner = OceanQuadCorner[vertexId % 6u];
 	float2 rest;
@@ -143,7 +146,7 @@ float OceanValueNoise(float2 p)
 [shader("fragment")]
 ForwardOpaqueTargets fragmentMain(VertexOutput input)
 {
-	const OceanSurfaceParams p = Params[0];
+	const OceanSurfaceParams p = LoadRowRecord<OceanSurfaceParams>(Params, 0);
 	const ForwardView view = Views[0];
 	const float3 toCamera = view.CameraPosition - input.WorldPosition;
 	const float viewDistance = length(toCamera);

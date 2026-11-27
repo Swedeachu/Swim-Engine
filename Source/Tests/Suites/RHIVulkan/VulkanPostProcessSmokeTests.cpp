@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_POST_HISTOGRAM_SPIRV_PATH) && defined(SWIM_POST_EXPOSURE_SPIRV_PATH) && defined(SWIM_POST_BLOOM_DOWNSAMPLE_SPIRV_PATH) && \
@@ -168,9 +169,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Post-process smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -505,11 +504,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PostProcessMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunPostProcessSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunPostProcessSmoke>("PostProcessMatchesTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

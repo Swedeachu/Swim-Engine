@@ -324,6 +324,7 @@ namespace Swim::UI
 
 		// --- Layout (UiLayout.cpp) ---
 		UiPoint Measure(Node& node, UiPoint available, float wrap);
+		UiPoint MeasureChildren(Node& node, UiPoint inner, float childRoom);
 
 		void Arrange(Node& node, UiRect bounds, UiRect clip, bool enabled);
 

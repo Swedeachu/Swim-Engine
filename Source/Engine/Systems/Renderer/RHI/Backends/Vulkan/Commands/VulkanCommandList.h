@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Commands/VulkanCommandPoolState.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
+#include "Engine/Systems/Renderer/RHI/RhiDescriptorBindings.h"
 
 #include <volk.h>
 
@@ -174,7 +175,9 @@ namespace Swim::RhiVulkan
 			std::uint64_t Bytes = 0;
 		};
 		std::vector<VertexBufferBinding> vertexBuffers;
-		std::vector<const VulkanDescriptorTable*> boundTables;
+		// Bound tables per bind point (Rhi::DescriptorBindingState: kept across compatible pipelines).
+		Rhi::DescriptorBindingState graphicsTables;
+		Rhi::DescriptorBindingState computeTables;
 
 		std::uint32_t debugLabelDepth = 0;
 		bool executable = false;

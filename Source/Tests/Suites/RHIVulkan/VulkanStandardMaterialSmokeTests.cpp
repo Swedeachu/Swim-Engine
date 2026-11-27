@@ -12,6 +12,7 @@
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_GPU_VISIBILITY_SPIRV_PATH) && defined(SWIM_RHI_STANDARD_MATERIAL_DRAW_SPIRV_PATH) &&                                      \
@@ -37,7 +38,7 @@ namespace
 
 	std::vector<std::byte> ReadSpirv(const char* path)
 	{
-		std::ifstream file(path, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(path), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytes(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -50,7 +51,7 @@ namespace
 	{
 		const auto reflection = Swim::ShaderCompiler::LoadSlangReflectionJson(path);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		auto converted = Swim::ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, path);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		return converted;
 	}
@@ -135,9 +136,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Standard material smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		const auto& capabilities = graphics->GetAdapter(0).GetInfo().Capabilities;
 		SWIM_REQUIRE_MESSAGE(capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
@@ -149,8 +148,7 @@ namespace
 		{
 			const auto& programInterface = reflected.Interface;
 			const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytes };
-			program = device->CreateShaderProgram({ { &stage, 1 },
-				{ programInterface.DescriptorSchemas, programInterface.PushConstants, programInterface.ComputeThreadGroupSize }, label });
+			program = device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(programInterface), label });
 			SWIM_REQUIRE(program);
 			layout = device->CreatePipelineLayout({ program.get(), label });
 			SWIM_REQUIRE(layout);
@@ -181,8 +179,7 @@ namespace
 		const auto& draw = drawInterface.Interface;
 		const std::array<Rhi::ShaderStageArtifact, 2> drawStages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", drawBytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", drawBytes } } };
-		auto drawProgram =
-			device->CreateShaderProgram({ drawStages, { draw.DescriptorSchemas, draw.PushConstants }, "Standard material draw" });
+		auto drawProgram = device->CreateShaderProgram({ drawStages, Swim::Testing::SmokeInterfaceDesc(draw), "Standard material draw" });
 		SWIM_REQUIRE(drawProgram);
 		auto drawLayout = device->CreatePipelineLayout({ drawProgram.get(), "Standard material layout", { &bindlessSpace, 1 } });
 		SWIM_REQUIRE(drawLayout);
@@ -692,12 +689,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add(
-				{ "RHI.Vulkan.Smoke", "StandardMaterialsShadeFromTheGpuMaterialTable", SWIM_TEST_LOCATION,
-					+[]
-					{
-						Swim::Testing::RunValidatedVulkanSmoke(&RunStandardMaterialSmoke);
-					} });
+			Swim::Testing::AddSmoke<&RunStandardMaterialSmoke>("StandardMaterialsShadeFromTheGpuMaterialTable", SWIM_TEST_LOCATION);
 		}
 
 		return true;

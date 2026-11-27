@@ -24,6 +24,10 @@ namespace Swim::Render
 		// The main camera view: RenderObjectFlags::Overlay objects are drawable here (always
 		// visible, no frustum or occlusion test) and only here.
 		Overlay = 1u << 6,
+		// Shadow views of a cached cascade drawn in two layers: only RenderObjectFlags::Static
+		// objects (StaticCasters) or only the others (DynamicCasters) are drawable.
+		StaticCasters = 1u << 7,
+		DynamicCasters = 1u << 8,
 		// Both histories reset: what a camera cut or teleport sets.
 		CameraCut = ResetLodHistory | ResetOcclusionHistory,
 	};

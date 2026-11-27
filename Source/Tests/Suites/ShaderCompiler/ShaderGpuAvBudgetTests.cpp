@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -162,4 +163,32 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 
 	SWIM_CHECK_MESSAGE(total > 0u, "no buffer accesses counted: the counter is broken");
 }
+
+#if defined(SWIM_RUNTIME_SHADER_DIR)
+// The same budget for every program of the staged runtime set, so a new program cannot
+// miss the list above.
+SWIM_TEST("ShaderCompiler.GpuAvBudget", "EveryRuntimeProgramStaysBelowTheGpuAvInstrumentationWarning")
+{
+	std::size_t checked = 0;
+
+	for (const auto& entry : std::filesystem::directory_iterator(SWIM_RUNTIME_SHADER_DIR))
+	{
+		if (entry.path().extension() != ".spv")
+		{
+			continue;
+		}
+
+		const auto path = entry.path().string();
+		const auto words = ReadWords(path.c_str());
+		SWIM_REQUIRE_MESSAGE(words.size() > 5 && words[0] == 0x07230203u, "not SPIR-V: " + path);
+		const auto accesses = InstrumentedBufferAccesses(words);
+		SWIM_CHECK_MESSAGE(accesses <= GpuAvGeneralBufferLimit,
+			entry.path().stem().string() + ": " + std::to_string(accesses) +
+				" buffer accesses would trigger GPUAV-Compile-time-general-buffer under GPU-assisted validation");
+		++checked;
+	}
+
+	SWIM_CHECK(checked > 0u);
+}
+#endif
 #endif

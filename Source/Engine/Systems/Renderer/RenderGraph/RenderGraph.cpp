@@ -15,6 +15,27 @@ namespace Swim::Render
 		{
 			throw std::overflow_error("RenderGraph identity exhausted");
 		}
+
+		id = definition.Id;
+	}
+
+	void RenderGraph::OnAbandoned(std::function<void()> undo)
+	{
+		if (undo)
+		{
+			abandoned.push_back(std::move(undo));
+		}
+	}
+
+	void RenderGraph::Abandon()
+	{
+		const auto undo = std::move(abandoned);
+		abandoned.clear();
+
+		for (auto entry = undo.rbegin(); entry != undo.rend(); ++entry)
+		{
+			(*entry)();
+		}
 	}
 
 	GraphBuffer RenderGraph::CreateBuffer(const Rhi::BufferDesc& desc)
@@ -149,15 +170,16 @@ namespace Swim::Render
 		r.Staging = Internal::GraphStaging::Upload;
 		r.Initial = Rhi::ResourceState::HostWrite;
 		r.Alignment = desc.Alignment;
+		r.ElementStride = desc.ElementStride;
 		r.Writer = std::move(writer);
 		return handle;
 	}
 
-	GraphBuffer RenderGraph::CreateUpload(
-		std::span<const std::byte> bytes, std::string_view name, Rhi::BufferUsage usage, std::uint64_t alignment)
+	GraphBuffer RenderGraph::CreateUpload(std::span<const std::byte> bytes, std::string_view name, Rhi::BufferUsage usage,
+		std::uint64_t alignment, std::uint64_t elementStride)
 	{
 		auto owned = std::make_shared<const std::vector<std::byte>>(bytes.begin(), bytes.end());
-		return CreateUpload({ bytes.size(), usage, alignment, name },
+		return CreateUpload({ bytes.size(), usage, alignment, name, elementStride },
 			[owned](std::span<std::byte> destination)
 			{
 				std::copy(owned->begin(), owned->end(), destination.begin());

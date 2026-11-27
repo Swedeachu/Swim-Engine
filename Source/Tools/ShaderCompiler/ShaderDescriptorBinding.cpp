@@ -29,6 +29,7 @@ namespace Swim::ShaderCompiler
 		Rhi::Format storageFormat = Rhi::Format::Undefined;
 		Rhi::SampledTextureClass sampledClass = Rhi::SampledTextureClass::Float;
 		Rhi::TextureViewDimension sampledDimension = Rhi::TextureViewDimension::Texture2D;
+		bool multisampled = false;
 
 		if (typeKind == "samplerState")
 		{
@@ -60,7 +61,9 @@ namespace Swim::ShaderCompiler
 		{
 			if ((parameter.ResourceShape == "texture1D" || parameter.ResourceShape == "texture2D" ||
 					parameter.ResourceShape == "textureCube" || (parameter.ResourceShape == "texture3D" && !parameter.ResourceArray)) &&
-				!parameter.ResourceMultisample && parameter.ResourceComponentCount >= 1 && parameter.ResourceComponentCount <= 4 &&
+				(!parameter.ResourceMultisample ||
+					(parameter.ResourceShape == "texture2D" && !parameter.ResourceArray && !descriptorArray)) &&
+				parameter.ResourceComponentCount >= 1 && parameter.ResourceComponentCount <= 4 &&
 				(parameter.ResourceScalarType == "float32" || parameter.ResourceScalarType == "uint32" ||
 					parameter.ResourceScalarType == "int32"))
 			{
@@ -72,6 +75,7 @@ namespace Swim::ShaderCompiler
 				}
 
 				type = Rhi::DescriptorType::SampledTexture;
+				multisampled = parameter.ResourceMultisample; // Texture2DMS: loaded per sample.
 
 				if (parameter.ResourceShape == "texture1D")
 				{
@@ -149,8 +153,8 @@ namespace Swim::ShaderCompiler
 
 		// The caller supplies global or entry-point visibility; binding coordinates stay absolute.
 		// Runtime-sized arrays keep Count 0: the pipeline layout supplies their capacity.
-		schema->Bindings.push_back(
-			{ parameter.Index, type, runtimeSized ? 0u : count, stages, false, false, storageFormat, sampledClass, sampledDimension });
+		schema->Bindings.push_back({ parameter.Index, type, runtimeSized ? 0u : count, stages, false, false, storageFormat, sampledClass,
+			sampledDimension, false, multisampled });
 		return {};
 	}
 

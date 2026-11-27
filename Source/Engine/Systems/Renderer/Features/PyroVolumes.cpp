@@ -57,6 +57,41 @@ namespace Engine
 			}
 		}
 
+		// One volume's shader record, every field clamped to its valid range.
+		void PackVolume(const PyroVolumes::Volume& volume, float height, float radius, float bound, VolumeRecord& record)
+		{
+			using Type = PyroVolumes::Type;
+
+			for (int c = 0; c < 3; ++c)
+			{
+				record.PositionRadius[c] = Finite(volume.Position[c], 0.0f);
+				record.Color[c] = std::max(Finite(volume.Tint[c], 1.0f), 0.0f);
+				record.Shape[0] = float(static_cast<std::uint32_t>(volume.Kind));
+			}
+
+			record.PositionRadius[3] = bound;
+			record.Shape[1] = height;
+			record.Shape[2] = radius;
+			record.Shape[3] = std::clamp(Finite(volume.Age, 0.0f), 0.0f, 1.0f);
+			record.Color[3] = std::clamp(Finite(volume.Intensity, 1.0f), 0.0f, 1000.0f);
+			record.Params[0] = std::clamp(Finite(volume.Density, 1.0f), 0.0f, 100.0f);
+			record.Params[1] = std::clamp(Finite(volume.RiseSpeed, 1.5f), -50.0f, 50.0f);
+			record.Params[2] = std::fmod(std::abs(Finite(volume.Seed, 0.0f)), 1000.0f);
+			record.Params[3] = std::clamp(Finite(volume.Distortion, 0.0f), 0.0f, 10.0f);
+			record.Extra[0] = std::clamp(Finite(volume.TintMix, 0.0f), 0.0f, 1.0f);
+			record.Extra[1] = float(std::min(volume.Embers, 32u));
+			record.Extra[2] = std::clamp(Finite(volume.SmokeAlbedo, 0.35f), 0.0f, 1.0f);
+			record.Extra[3] = std::clamp(Finite(volume.SmokeGlowStrength, 0.0f), 0.0f, 100.0f);
+
+			if (volume.Kind == Type::Smoke)
+			{
+				for (int c = 0; c < 3; ++c)
+				{
+					record.Color[c] = std::max(Finite(volume.SmokeGlow[c], 0.0f), 0.0f);
+				}
+			}
+		}
+
 	} // namespace
 
 	void PyroVolumes::Record(RenderFeatureContext& context)
@@ -98,36 +133,7 @@ namespace Engine
 				continue;
 			}
 
-			auto& record = params.Volumes[count++];
-
-			for (int c = 0; c < 3; ++c)
-			{
-				record.PositionRadius[c] = Finite(volume.Position[c], 0.0f);
-				record.Color[c] = std::max(Finite(volume.Tint[c], 1.0f), 0.0f);
-				record.Shape[0] = float(static_cast<std::uint32_t>(volume.Kind));
-			}
-
-			record.PositionRadius[3] = bound;
-			record.Shape[1] = height;
-			record.Shape[2] = radius;
-			record.Shape[3] = std::clamp(Finite(volume.Age, 0.0f), 0.0f, 1.0f);
-			record.Color[3] = std::clamp(Finite(volume.Intensity, 1.0f), 0.0f, 1000.0f);
-			record.Params[0] = std::clamp(Finite(volume.Density, 1.0f), 0.0f, 100.0f);
-			record.Params[1] = std::clamp(Finite(volume.RiseSpeed, 1.5f), -50.0f, 50.0f);
-			record.Params[2] = std::fmod(std::abs(Finite(volume.Seed, 0.0f)), 1000.0f);
-			record.Params[3] = std::clamp(Finite(volume.Distortion, 0.0f), 0.0f, 10.0f);
-			record.Extra[0] = std::clamp(Finite(volume.TintMix, 0.0f), 0.0f, 1.0f);
-			record.Extra[1] = float(std::min(volume.Embers, 32u));
-			record.Extra[2] = std::clamp(Finite(volume.SmokeAlbedo, 0.35f), 0.0f, 1.0f);
-			record.Extra[3] = std::clamp(Finite(volume.SmokeGlowStrength, 0.0f), 0.0f, 100.0f);
-
-			if (volume.Kind == Type::Smoke)
-			{
-				for (int c = 0; c < 3; ++c)
-				{
-					record.Color[c] = std::max(Finite(volume.SmokeGlow[c], 0.0f), 0.0f);
-				}
-			}
+			PackVolume(volume, height, radius, bound, params.Volumes[count++]);
 		}
 
 		if (count == 0)

@@ -48,6 +48,10 @@ namespace
 						{ R::History, T::SampledTexture }, { R::Sampler, T::Sampler }, { R::Params, T::ReadOnlyStorageBuffer },
 						{ R::Output, T::StorageTexture }, { R::HistoryOut, T::StorageTexture } });
 			}
+			schema(linearLayout,
+				{ { ScreenSpaceLinearDepthBindings::Depth, T::SampledTexture },
+					{ ScreenSpaceLinearDepthBindings::Params, T::ReadOnlyStorageBuffer },
+					{ ScreenSpaceLinearDepthBindings::Output, T::StorageTexture } });
 			schema(blurLayout,
 				{ { ScreenSpaceBlurBindings::Source, T::SampledTexture }, { ScreenSpaceBlurBindings::Depth, T::SampledTexture },
 					{ ScreenSpaceBlurBindings::Params, T::ReadOnlyStorageBuffer },
@@ -164,8 +168,8 @@ namespace
 
 		Testing::MockDevice device;
 		std::unique_ptr<RenderGraphExecutor> executor;
-		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout, reflectionLayout, temporalLayout;
-		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline, reflectionPipeline, temporalPipeline;
+		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout, reflectionLayout, temporalLayout, linearLayout;
+		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline, reflectionPipeline, temporalPipeline, linearPipeline;
 		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect, reflectance, specular, history, velocity, backDepth, objectId, probeCubes;
 		std::unique_ptr<Rhi::Sampler> sampler;
 	};
@@ -270,6 +274,26 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsAoBlurAndCompositeOrOnlyWhatIsEna
 	}
 	SWIM_CHECK(ScreenSpaceEffects::OcclusionDesc(4, 2).PixelFormat == Rhi::Format::R32Float);
 	SWIM_CHECK(ScreenSpaceEffects::OutputDesc(4, 2).PixelFormat == Rhi::Format::RGBA16Float);
+}
+
+SWIM_TEST("Render.ScreenSpaceEffects", "TheAoLinearDepthPassFeedsTheAoAndItsBlur")
+{
+	ScreenSpaceWorld world;
+	auto desc = world.Desc();
+	desc.LinearDepth = { &world.linearPipeline, &world.linearLayout, 0 };
+	const ScreenSpaceEffects effects(desc);
+
+	for (const bool linear : { true, false })
+	{
+		ScreenSpaceSettings settings;
+		settings.AmbientOcclusion.LinearDepth = linear;
+		RenderGraph graph;
+		const auto frame = world.Frame(graph, settings);
+		const auto resources = effects.Record(graph, frame);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.AoHalf, linear ? 2u : 0u);
+		world.Run(graph, resources.Output);
+		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(linear ? 4 : 3)); // The AO depth pass first.
+	}
 }
 
 SWIM_TEST("Render.ScreenSpaceEffects", "RejectsMissingProgramsAndInvalidInputs")
@@ -381,6 +405,7 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		ScreenSpaceSettings settings;
 		settings.Reflections.Enabled = true;
 		settings.Reflections.HalfResolution = true;
+		settings.Reflections.HalfTapCache = true;
 		RenderGraph graph;
 		const auto frame = world.Frame(graph, settings);
 		const auto resources = effects.Record(graph, frame);

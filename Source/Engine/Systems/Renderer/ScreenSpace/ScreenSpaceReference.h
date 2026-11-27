@@ -59,8 +59,15 @@ namespace Swim::Render::ScreenSpace
 	using ColorImage = Plane<Float4>;
 	using ScalarImage = Plane<float>;
 
-	// General 4x4 inverse (row-major); std::nullopt when singular or non-finite.
+	// General 4x4 inverse (row-major); std::nullopt when singular or non-finite. Singular means
+	// a determinant at or below 1e-12 of the smaller Hadamard bound (product of the row or of the
+	// column lengths), so a view far from the origin (long translation) is not mistaken for one.
 	std::optional<std::array<float, 16>> Inverse(const std::array<float, 16>& m);
+
+	// Why a camera's view and projection cannot render, or nullptr when they can: a non-finite
+	// entry or a singular matrix (Inverse). The renderer's camera check and
+	// BuildScreenSpaceParams both use it, so a camera the renderer accepts always inverts here.
+	const char* ViewProjectionProblem(const std::array<float, 16>& view, const std::array<float, 16>& projection);
 
 	// Interleaved gradient noise in [0, 1) at a pixel, rotated by the frame (0 .. 63).
 	float InterleavedGradientNoise(float x, float y, std::uint32_t frame);

@@ -135,7 +135,7 @@ namespace Engine
 		std::uint32_t resolution = 0;
 		std::uint32_t cascades = 0;
 		bool historyValid = false;
-		const Swim::Render::RenderGraph* graph = nullptr;
+		std::uint64_t graph = 0; // RenderGraph::GetId of the graph maps belongs to.
 		std::uint32_t frame = ~0u;
 		double time = 0.0;
 		OceanMaps maps;

@@ -27,6 +27,7 @@ namespace Swim::Render::Internal
 		bool Exported = false;
 		GraphStaging Staging = GraphStaging::None;
 		std::uint64_t Alignment = 4;
+		std::uint64_t ElementStride = 0; // Uploads: the offset is also a multiple of it.
 		GraphUploadWriter Writer;
 
 		// Contents exist before the first pass: defined imports and uploads.

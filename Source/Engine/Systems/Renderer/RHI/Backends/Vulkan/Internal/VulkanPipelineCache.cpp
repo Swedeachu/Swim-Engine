@@ -4,6 +4,8 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 
 #include <mutex>
+#include <sstream>
+#include <vector>
 
 namespace Swim::RhiVulkan
 {
@@ -146,8 +148,11 @@ namespace Swim::RhiVulkan
 		EnsureInitialized(state);
 		std::shared_lock lock(state.PipelineCache.Mutex);
 		RequireVulkanDevice(state);
-		return CheckVulkanResult(state, state.Dispatch.vkCreateGraphicsPipelines(state.Device.device,
-			state.PipelineCache.Handle, 1, &info, nullptr, &pipeline), "vkCreateGraphicsPipelines");
+		VkGraphicsPipelineCreateInfo create = info;
+		create.flags |= state.PipelineStatisticsEnabled ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0u;
+		return CheckVulkanResult(state,
+			state.Dispatch.vkCreateGraphicsPipelines(state.Device.device, state.PipelineCache.Handle, 1, &create, nullptr, &pipeline),
+			"vkCreateGraphicsPipelines");
 	}
 
 	VkResult CreateCachedVulkanComputePipeline(const VulkanDeviceState& state, const VkComputePipelineCreateInfo& info, VkPipeline& pipeline)
@@ -155,8 +160,66 @@ namespace Swim::RhiVulkan
 		EnsureInitialized(state);
 		std::shared_lock lock(state.PipelineCache.Mutex);
 		RequireVulkanDevice(state);
-		return CheckVulkanResult(state, state.Dispatch.vkCreateComputePipelines(state.Device.device,
-			state.PipelineCache.Handle, 1, &info, nullptr, &pipeline), "vkCreateComputePipelines");
+		VkComputePipelineCreateInfo create = info;
+		create.flags |= state.PipelineStatisticsEnabled ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0u;
+		return CheckVulkanResult(state,
+			state.Dispatch.vkCreateComputePipelines(state.Device.device, state.PipelineCache.Handle, 1, &create, nullptr, &pipeline),
+			"vkCreateComputePipelines");
+	}
+
+	void LogVulkanPipelineStatistics(const VulkanDeviceState& state, VkPipeline pipeline, std::string_view name)
+	{
+		if (!state.PipelineStatisticsEnabled || pipeline == VK_NULL_HANDLE || !state.Instance || !state.Instance->Diagnostics.Log ||
+			!state.Dispatch.vkGetPipelineExecutablePropertiesKHR || !state.Dispatch.vkGetPipelineExecutableStatisticsKHR)
+		{
+			return;
+		}
+
+		const VkDevice device = state.Device.device;
+		VkPipelineInfoKHR pipelineInfo{ VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR };
+		pipelineInfo.pipeline = pipeline;
+		std::uint32_t count = 0;
+		state.Dispatch.vkGetPipelineExecutablePropertiesKHR(device, &pipelineInfo, &count, nullptr);
+		std::vector<VkPipelineExecutablePropertiesKHR> executables(count, { VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR });
+		state.Dispatch.vkGetPipelineExecutablePropertiesKHR(device, &pipelineInfo, &count, executables.data());
+		std::ostringstream text;
+		text << (name.empty() ? std::string_view("(unnamed)") : name);
+
+		for (std::uint32_t i = 0; i < count; ++i)
+		{
+			VkPipelineExecutableInfoKHR executable{ VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR };
+			executable.pipeline = pipeline;
+			executable.executableIndex = i;
+			std::uint32_t statCount = 0;
+			state.Dispatch.vkGetPipelineExecutableStatisticsKHR(device, &executable, &statCount, nullptr);
+			std::vector<VkPipelineExecutableStatisticKHR> stats(statCount, { VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR });
+			state.Dispatch.vkGetPipelineExecutableStatisticsKHR(device, &executable, &statCount, stats.data());
+			text << " | " << executables[i].name << " (subgroup " << executables[i].subgroupSize << "):";
+
+			for (std::uint32_t s = 0; s < statCount; ++s)
+			{
+				const auto& stat = stats[s];
+				text << ' ' << stat.name << '=';
+
+				switch (stat.format)
+				{
+				case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
+					text << (stat.value.b32 ? "true" : "false");
+					break;
+				case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
+					text << stat.value.i64;
+					break;
+				case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
+					text << stat.value.u64;
+					break;
+				default:
+					text << stat.value.f64;
+					break;
+				}
+			}
+		}
+
+		state.Instance->Diagnostics.Log->Record(Rhi::DiagnosticSeverity::Info, "PipelineStatistics", text.str());
 	}
 
 	void DestroyVulkanPipelineCache(const VulkanDeviceState& state) noexcept

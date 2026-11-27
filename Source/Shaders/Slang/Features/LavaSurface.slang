@@ -6,6 +6,7 @@
 // with the two-phase flow-map trick. It glows bright yellow-orange from a blackbody ramp,
 // with darker cooling streaks drifting on it, and its normal undulates with the noise
 // (surface-gradient bump). The emission is HDR, so bloom gives the glow.
+#include "Resources/DrawIndex.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 
 struct LavaParams
@@ -37,8 +38,9 @@ struct VertexOutput
 static const uint LavaQuadCorner[6] = { 0, 1, 2, 0, 2, 3 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	const LavaQuad quad = Quads[vertexId / 6u];
 	const float3 world = quad.Corners[LavaQuadCorner[vertexId % 6u]].xyz;
 	const ForwardClip clip = ForwardProjectWorld(world, world);

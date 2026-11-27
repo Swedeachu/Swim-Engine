@@ -46,7 +46,6 @@ namespace Swim::RhiVulkan
 			throw std::invalid_argument("Cannot bind a null compute pipeline");
 		}
 
-		boundTables.assign(native.GetLayoutState()->Sets.size(), nullptr);
 		GetState()->Dispatch.vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
 			FromNativeHandle<VkPipeline>(native.GetNativeHandle()));
 		computePipeline = &native;

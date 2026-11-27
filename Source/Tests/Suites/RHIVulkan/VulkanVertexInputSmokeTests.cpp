@@ -1,6 +1,7 @@
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
@@ -19,7 +20,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(false, "Vertex-input smoke requires SWIM_BUILD_SHADER_COMPILER=ON and the generated Slang artifact");
 #else
 		using namespace Swim;
-		std::ifstream file(SWIM_RHI_VERTEX_INPUT_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_VERTEX_INPUT_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE_MESSAGE(file, "Compiled RHI vertex-input shader is missing");
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -34,16 +35,15 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Vertex-input smoke requires the full Swim Vulkan 1.3 baseline");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{{
 			{ Rhi::ShaderStageMask::Vertex, "vertexMain", bytecode },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytecode }
 		}};
-		auto program = device->CreateShaderProgram({ stages, {}, "RHI vertex input" });
+		auto program = device->CreateShaderProgram(
+			{ stages, Swim::Testing::SmokeInputsOnlyDesc(SWIM_RHI_VERTEX_INPUT_REFLECTION_PATH), "RHI vertex input" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "RHI vertex input layout" });
 		SWIM_REQUIRE(layout);
@@ -183,7 +183,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "VertexBuffersIndexedAndInstancedPixels", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunVertexInputSmoke); } });
+			Swim::Testing::AddSmoke<&RunVertexInputSmoke>("VertexBuffersIndexedAndInstancedPixels", SWIM_TEST_LOCATION);
 		}
 
 		return true;

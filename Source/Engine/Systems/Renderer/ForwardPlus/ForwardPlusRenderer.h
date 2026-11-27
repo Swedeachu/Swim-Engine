@@ -116,6 +116,10 @@ namespace Swim::Render
 		// The copies it returns are read by the transparent pass and handed to its external
 		// draws (ExternalDrawContext::Scene).
 		std::function<ExternalSceneCopy(RenderGraph& graph, GraphTexture color, GraphTexture depth)> BeforeTransparent;
+		// The depth prepass, opaque pass and deferred local lights (off: the targets already
+		// hold the opaque result, a multisampled frame's resolve; only the back depth and the
+		// transparent sort and pass run). BeforeOpaque is not called without them.
+		bool Opaque = true;
 	};
 
 	// Viewport-sized render targets (the cluster grid's viewport).
@@ -152,6 +156,11 @@ namespace Swim::Render
 		// and written by a pass after the opaque one. Screen-space reflections take each
 		// surface's thickness from it (ScreenSpace::SurfaceThickness).
 		std::optional<GraphTexture> BackDepth;
+		// Every target but BackDepth has this sample count; the renderer's pipelines must have
+		// been created with it. Multisampled targets run without deferred local lights, hand
+		// BeforeOpaque no prepass depth (it cannot be sampled as one texture), and set
+		// ForwardViewFlagAlphaToCoverage (alpha-masked materials write their coverage).
+		Rhi::SampleCount Samples = Rhi::SampleCount::X1;
 		bool Clear = true; // Clear color/id/depth first; otherwise load them.
 		// With Clear off: still clear every target but Color and Depth (the sky pass before
 		// the frame writes only those, instead of storing zeros to six more targets per pixel).
@@ -230,7 +239,8 @@ namespace Swim::Render
 		ForwardPlusRenderer& operator=(const ForwardPlusRenderer&) = delete;
 
 		// Throws std::invalid_argument for missing inputs, targets that are not
-		// viewport-sized with the formats above, visibility bins that do not match
+		// viewport-sized with the formats above and ForwardPlusTargets::Samples (BackDepth:
+		// one sample), visibility bins that do not match
 		// ForwardPlusBinCount x PageSlots, a transparent capacity above
 		// ForwardTransparentSortBindings::MaxDraws, or an invalid view.
 		ForwardPlusGraphResources Record(RenderGraph& graph, const ForwardPlusFrame& frame, const ForwardPlusTargets& targets) const;
@@ -238,6 +248,17 @@ namespace Swim::Render
 		Rhi::Sampler& GetEnvironmentSampler() const { return *environmentSampler; }
 
 	  private:
+		struct Recording;
+
+		void PrepareFrame(Recording& r) const;
+		void BindEnvironment(Recording& r) const;
+		void BindShadows(Recording& r) const;
+		void RecordDepthPrepass(Recording& r) const;
+		void RecordBackDepth(Recording& r) const;
+		void RecordOpaque(Recording& r) const;
+		void RecordLocalLights(Recording& r) const;
+		void RecordTransparentSort(Recording& r) const;
+		void RecordTransparent(Recording& r) const;
 
 		ForwardPlusRendererDesc desc;
 		std::unique_ptr<Rhi::Sampler> environmentSampler;

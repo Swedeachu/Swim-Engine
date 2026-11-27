@@ -21,6 +21,10 @@ namespace Swim::Render
 	// A split-sum BRDF LUT is bound (always with an environment; item 76 also allows it
 	// alone, for the specular reflectance screen-space reflections are weighted by).
 	inline constexpr std::uint32_t ForwardViewFlagBrdfLut = 1u << 2;
+	// Multisampled targets with alpha-to-coverage pipelines: alpha-masked materials write
+	// their coverage to colour alpha (and keep partly covered texels) instead of discarding
+	// at the cutoff, so cutout edges are antialiased.
+	inline constexpr std::uint32_t ForwardViewFlagAlphaToCoverage = 1u << 3;
 
 	// ForwardViewRecord::DebugMode.
 	enum class ForwardPlusDebugMode : std::uint32_t

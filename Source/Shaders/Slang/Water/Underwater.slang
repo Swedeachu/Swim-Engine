@@ -111,7 +111,11 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		if (p.Shafts.z > 0.0)
 		{
 			const float2 spread = float2(0.035, 0.0) * min(below, 8.0);
-			caustic = float3(WaterCaustics(entry - spread, time), WaterCaustics(entry, time), WaterCaustics(entry + spread, time));
+			WaterCausticSites first = WaterCausticSitesEmpty();
+			WaterCausticSites second = WaterCausticSitesEmpty();
+			const float r = WaterCausticsCached(entry - spread, time, first, second);
+			const float g = WaterCausticsCached(entry, time, first, second);
+			caustic = float3(r, g, WaterCausticsCached(entry + spread, time, first, second));
 		}
 		else
 		{
@@ -144,6 +148,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		const float stepSize = shaftLength / float(steps);
 		const float dither = FeatureGradientNoise(float2(id.xy), p.Size.z);
 		float3 sum = float3(0.0, 0.0, 0.0);
+		WaterCausticSites sites = WaterCausticSitesEmpty();
 		for (uint i = 0u; i < steps; ++i)
 		{
 			const float t = (float(i) + dither) * stepSize;
@@ -153,7 +158,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			{
 				continue;
 			}
-			const float light = WaterCausticsSoft(SurfaceEntry(at, sunInWater, surface) * p.Surface.z * 0.35, time * 0.6);
+			const float light = WaterCausticsSoft(SurfaceEntry(at, sunInWater, surface) * p.Surface.z * 0.35, time * 0.6, sites);
 			sum += exp(-extinction * (t + depthBelow)) * (light * light + 0.08);
 		}
 		const float g = 0.55;

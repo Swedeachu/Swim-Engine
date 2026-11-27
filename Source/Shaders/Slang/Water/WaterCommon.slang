@@ -104,55 +104,101 @@ float2 WaterHash2(float2 p)
 	return float2(r >> 8) * (1.0 / 16777216.0);
 }
 
+// The animated feature point of one caustic cell (0..1 inside the cell).
+float2 WaterCausticSite(float2 cell, float time)
+{
+	const float2 h = WaterHash2(cell);
+	return 0.5 + 0.42 * sin(time * (0.6 + 0.5 * h) + 2.0 * WaterPi * h.yx);
+}
+
+// The 3x3 feature points around a cell, kept while a march stays inside that cell.
+struct WaterCausticSites
+{
+	float2 Cell;
+	bool Valid;
+	float2 Site[9];
+};
+
+WaterCausticSites WaterCausticSitesEmpty()
+{
+	WaterCausticSites sites;
+	sites.Cell = float2(0.0, 0.0);
+	sites.Valid = false;
+	[unroll]
+	for (int i = 0; i < 9; ++i)
+	{
+		sites.Site[i] = float2(0.0, 0.0);
+	}
+	return sites;
+}
+
 // One caustic layer: the edges of an animated cellular pattern (distance to the second
-// nearest feature point minus the nearest), sharpened into thin bright filaments.
-float WaterCausticLayer(float2 p, float time)
+// nearest feature point minus the nearest), sharpened into thin bright filaments. The
+// sites of the last cell are reused, so a march through few cells evaluates few sites.
+float WaterCausticLayerCached(float2 p, float time, inout WaterCausticSites sites)
 {
 	const float2 cell = floor(p);
+	if (!sites.Valid || any(cell != sites.Cell))
+	{
+		sites.Cell = cell;
+		sites.Valid = true;
+		[unroll]
+		for (int i = 0; i < 9; ++i)
+		{
+			sites.Site[i] = WaterCausticSite(cell + float2(float(i % 3 - 1), float(i / 3 - 1)), time);
+		}
+	}
 	const float2 f = p - cell;
 	float d1 = 8.0;
 	float d2 = 8.0;
 	[unroll]
-	for (int y = -1; y <= 1; ++y)
+	for (int i = 0; i < 9; ++i)
 	{
-		[unroll]
-		for (int x = -1; x <= 1; ++x)
+		const float2 r = float2(float(i % 3 - 1), float(i / 3 - 1)) + sites.Site[i] - f;
+		const float d = dot(r, r);
+		if (d < d1)
 		{
-			const float2 offset = float2(float(x), float(y));
-			const float2 h = WaterHash2(cell + offset);
-			const float2 site = 0.5 + 0.42 * sin(time * (0.6 + 0.5 * h) + 2.0 * WaterPi * h.yx);
-			const float2 r = offset + site - f;
-			const float d = dot(r, r);
-			if (d < d1)
-			{
-				d2 = d1;
-				d1 = d;
-			}
-			else if (d < d2)
-			{
-				d2 = d;
-			}
+			d2 = d1;
+			d1 = d;
+		}
+		else if (d < d2)
+		{
+			d2 = d;
 		}
 	}
 	const float edge = sqrt(d2) - sqrt(d1);
 	return pow(saturate(1.0 - edge * 2.2), 5.0);
 }
 
+float WaterCausticLayer(float2 p, float time)
+{
+	WaterCausticSites sites = WaterCausticSitesEmpty();
+	return WaterCausticLayerCached(p, time, sites);
+}
+
 // Caustic light at a world xz (metres / scale = pattern cells): two warped layers that
 // cross and brighten where filaments meet. Roughly 0..1.5, mean about 0.35.
-float WaterCaustics(float2 p, float time)
+// Nearby lookups (colour fringes) pass the same two site caches to share their cells.
+float WaterCausticsCached(float2 p, float time, inout WaterCausticSites first, inout WaterCausticSites second)
 {
 	const float2 warp = float2(sin(p.y * 1.7 + time * 0.9), sin(p.x * 1.3 - time * 0.7)) * 0.12;
-	const float a = WaterCausticLayer(p + warp, time);
+	const float a = WaterCausticLayerCached(p + warp, time, first);
 	const float2 q = float2(p.x * 0.8 - p.y * 0.6, p.x * 0.6 + p.y * 0.8) * 1.37 + float2(17.3, 4.1);
-	const float b = WaterCausticLayer(q - warp, time * 1.13);
+	const float b = WaterCausticLayerCached(q - warp, time * 1.13, second);
 	return a * 0.6 + b * 0.5 + a * b * 1.2;
 }
 
-// The cheap variant for volumetric shafts: one layer.
-float WaterCausticsSoft(float2 p, float time)
+float WaterCaustics(float2 p, float time)
 {
-	return WaterCausticLayer(p, time);
+	WaterCausticSites first = WaterCausticSitesEmpty();
+	WaterCausticSites second = WaterCausticSitesEmpty();
+	return WaterCausticsCached(p, time, first, second);
+}
+
+// The cheap variant for volumetric shafts: one layer (sites reused along the march).
+float WaterCausticsSoft(float2 p, float time, inout WaterCausticSites sites)
+{
+	return WaterCausticLayerCached(p, time, sites);
 }
 
 #endif

@@ -41,18 +41,30 @@ namespace Swim::RhiVulkan
 			{
 				RetireLostVulkanDevice(*state);
 
-				for (const auto& [key, view] : views)
+				// Views of an image this texture does not own (a swapchain image) go now, before
+				// their image; owned images and their views wait for the frames still in flight.
+				if (image == VK_NULL_HANDLE || allocation == nullptr)
 				{
-					(void)key;
-					state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
+					for (const auto& [key, view] : views)
+					{
+						(void)key;
+						state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
+					}
+
+					views.clear();
+					return;
 				}
 
-				views.clear();
+				state->Deferred->Release([state = state.get(), views = std::move(views), image = image, allocation = allocation]
+					{
+						for (const auto& [key, view] : views)
+						{
+							(void)key;
+							state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
+						}
 
-				if (image != VK_NULL_HANDLE && allocation != nullptr)
-				{
-					vmaDestroyImage(state->Allocator, image, allocation);
-				}
+						vmaDestroyImage(state->Allocator, image, allocation);
+					});
 			}
 
 			std::uintptr_t GetNativeHandle() const override

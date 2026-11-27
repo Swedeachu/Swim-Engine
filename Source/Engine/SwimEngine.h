@@ -34,6 +34,7 @@ namespace Engine
 	class CameraSystem;
 	class FrameRenderer;
 	class RenderDevice;
+	class Scene;
 	class SceneRenderBridge;
 	class SceneSystem;
 	class UiRuntime;
@@ -188,9 +189,21 @@ namespace Engine
 
 		bool MakeWindow();
 
+		// Init, in order: each phase uses the services the ones before it created.
+		int InitCoreServices();
+		int InitPhysics();
+		int InitPresentation();
+		int InitScenes();
+		void ApplySettings();
+
 		int InitRenderer();
 
 		void RegisterEngineCommands();
+		void RegisterSessionCommands();
+		void RegisterCaptureCommands();
+		void RegisterProfilingCommands();
+		void RegisterBenchCommands();
+		void RegisterConsoleCommands();
 
 		void RegisterInputCommands();
 
@@ -207,6 +220,17 @@ namespace Engine
 		void ApplyCameraComponents();
 
 		void UpdateTextInput();
+		// Update's UI step (camera aspect, UI sync, input routing) and its render step.
+		void SyncUi(Scene* scene, double realDelta);
+		void RenderFrame(double realDelta);
+		// Tick's steps.
+		void RunDeferredCommands();
+		void PumpPlatformEvents();
+		double MeasureRealDelta();
+		void DispatchInputActions();
+		void UpdateFpsCounter(double realDelta);
+
+		void ReleaseRenderer();
 
 		std::string GetWindowTitle() const;
 

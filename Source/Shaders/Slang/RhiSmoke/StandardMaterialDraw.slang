@@ -3,6 +3,7 @@
 // come from the bindless arrays in space 1; shading is StandardPbrShade with one
 // directional light and a constant ambient term. Normal maps use a tangent frame
 // derived from screen-space derivatives (no tangent stream).
+#include "Resources/DrawIndex.slang"
 #include "GpuScene/GpuSceneRecords.slang"
 #include "GpuScene/VisibilityRecords.slang"
 #include "Materials/StandardPbr.slang"
@@ -39,8 +40,10 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint drawSlotInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint drawSlot = DrawInstanceIndex(drawSlotInput);
 	const GpuDrawRecord record = DrawRecords[drawSlot];
 	const GpuInstanceRecord instance = Instances[record.InstanceRow];
 	const float3 local = float3(Positions[vertexId * 3], Positions[vertexId * 3 + 1], Positions[vertexId * 3 + 2]);

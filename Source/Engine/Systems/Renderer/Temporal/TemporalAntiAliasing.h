@@ -91,7 +91,7 @@ namespace Swim::Render
 		std::uint32_t latest = 0; // Index of the texture holding the last output.
 		bool historyValid = false;
 		std::uint64_t frameIndex = 0;
-		const RenderGraph* importedGraph = nullptr; // The graph importedHistory belongs to.
+		std::uint64_t importedGraph = 0; // RenderGraph::GetId of the graph importedHistory belongs to.
 		GraphTexture importedHistory{};
 
 	};

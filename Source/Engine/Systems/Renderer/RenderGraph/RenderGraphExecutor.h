@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RHI/RhiReadbackArena.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 
+#include <chrono>
 #include <span>
 
 namespace Swim::Render
@@ -81,6 +82,16 @@ namespace Swim::Render
 	  private:
 
 		Rhi::RhiObject& GetExport(std::uint64_t graph, std::uint32_t index, GraphKind kind) const;
+
+		void ValidateExecute(const CompiledRenderGraph& graph, const Rhi::SubmitDesc& synchronization) const;
+
+		void AllocateResources(const CompiledRenderGraph& graph);
+
+		void PrepareQueries(const CompiledRenderGraph& graph);
+
+		void RecordPasses(const CompiledRenderGraph& graph);
+
+		Rhi::TimelinePoint SubmitRecorded(const Rhi::SubmitDesc& synchronization, std::chrono::steady_clock::time_point mark);
 
 		void RecordBarriers(std::span<const GraphBarrier> barriers);
 

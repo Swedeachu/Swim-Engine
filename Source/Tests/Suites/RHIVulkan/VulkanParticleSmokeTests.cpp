@@ -8,6 +8,7 @@
 #include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
 #include "Tests/Fixtures/ParticleFixture.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_PARTICLE_SIMULATE_SPIRV_PATH) && defined(SWIM_PARTICLE_EMIT_SPIRV_PATH) && defined(SWIM_PARTICLE_COMPACT_SPIRV_PATH) &&   \
@@ -138,7 +139,7 @@ namespace
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", bytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytes } } };
 		RenderProgram program;
-		program.Program = device.CreateShaderProgram({ stages, { draw.DescriptorSchemas, draw.PushConstants }, "Particle render" });
+		program.Program = device.CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(draw), "Particle render" });
 		SWIM_REQUIRE(program.Program);
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), "Particle render", { &bindlessSpace, 1 } });
 		SWIM_REQUIRE(program.Layout);
@@ -167,9 +168,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Particle smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(
 			graphics->GetAdapter(0).GetInfo().Capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
@@ -626,11 +625,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuParticlesMatchTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunParticleSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunParticleSmoke>("GpuParticlesMatchTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

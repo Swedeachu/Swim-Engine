@@ -514,7 +514,61 @@ static const float GlossyTapWeights[3] = { 1.0, 0.6065307, 0.1353353 };
 // only on the pixel's own surface (depth and normal as above). The pixel's own trace (when it
 // was traced this frame) and its closest neighbours dominate sharp surfaces; rough ones
 // reach two texels further.
-float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
+// The traced texels around one 8 x 8 tile, loaded once by the whole group (checkerboard
+// reflections; the SwimScreenSpaceCompositeHalf variant, SCREEN_SPACE_HALF_CACHE = 1, so the
+// other paths keep their occupancy): per texel its normal and reflection (16-bit floats, as
+// stored) and its view distance. Taps of rougher surfaces that reach past the apron load
+// directly; the result is the same. SsrHalf 3 skips the cache.
+#ifndef SCREEN_SPACE_HALF_CACHE
+#define SCREEN_SPACE_HALF_CACHE 0
+#endif
+static const int HalfCacheApronRows = 6;
+static const int HalfCacheApronColumns = 6;
+static const int HalfCacheRows = 8 + 2 * HalfCacheApronRows;
+static const int HalfCacheColumns = 5 + 2 * HalfCacheApronColumns;
+#if SCREEN_SPACE_HALF_CACHE
+groupshared uint2 HalfCacheNormal[HalfCacheRows * HalfCacheColumns];
+groupshared float HalfCacheDistance[HalfCacheRows * HalfCacheColumns]; // 0: none.
+groupshared uint2 HalfCacheReflection[HalfCacheRows * HalfCacheColumns];
+#endif
+
+// The pack instructions, not 16-bit types (no Float16/Int16 device features needed).
+uint2 HalfPack(float4 v)
+{
+	return uint2(packHalf2x16(v.xy), packHalf2x16(v.zw));
+}
+
+float4 HalfUnpack(uint2 v)
+{
+	return float4(unpackHalf2x16ToFloat(v.x), unpackHalf2x16ToFloat(v.y));
+}
+
+struct HalfTapCache
+{
+	bool Valid;
+	int OriginRow;	  // Image row of cache row 0.
+	int OriginColumn; // Traced column of cache column 0.
+};
+
+void FillHalfTapCache(ScreenSpaceView view, HalfTapCache cache, uint threadIndex)
+{
+	const int traceWidth = (int(view.Width) + 1) / 2;
+	const uint frame = Params[0].NoiseFrame;
+	for (uint i = threadIndex; i < uint(HalfCacheRows * HalfCacheColumns); i += 64u)
+	{
+		const int row = clamp(cache.OriginRow + int(i) / HalfCacheColumns, 0, int(view.Height) - 1);
+		const int tx = clamp(cache.OriginColumn + int(i) % HalfCacheColumns, 0, traceWidth - 1);
+		const int column = int(ScreenSpaceCheckerColumn(frame, uint(row)));
+		const int2 source = int2(min(tx * 2 + column, int(view.Width) - 1), row);
+#if SCREEN_SPACE_HALF_CACHE
+		HalfCacheNormal[i] = HalfPack(Normal.Load(int3(source, 0)));
+		HalfCacheDistance[i] = ScreenSpaceLoadViewDistance(view, Depth, source.x, source.y);
+		HalfCacheReflection[i] = HalfPack(Reflection.Load(int3(tx, row, 0)));
+#endif
+	}
+}
+
+float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y, HalfTapCache cache)
 {
 	const int traceWidth = (int(view.Width) + 1) / 2;
 	const uint frame = Params[0].NoiseFrame;
@@ -528,7 +582,7 @@ float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 	const float r = clamp(encoded.w, 0.0, 1.0);
 	const float radius = min(GlossyBlurScale * r * sqrt(r), GlossyBlurMax) * (float(view.Height) / 1080.0);
 	const float sigma = max(0.75, floor(radius * 0.5 + 0.5));
-	const float inverseTwoSigma2 = 0.5 / (sigma * sigma);
+	const float falloff = 0.5 * 1.44269504 / (sigma * sigma); // exp(-d^2 / 2 sigma^2) as exp2.
 	const int reach = sigma > 1.5 ? 2 : 1;
 	const int step = int(max(1.0, floor(sigma * 0.5 + 0.5)));
 	const float centreDepth = -position.z;
@@ -546,19 +600,35 @@ float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 		{
 			const int tx = clamp(nearest + ox * step, 0, traceWidth - 1);
 			const int2 source = int2(min(tx * 2 + column, int(view.Width) - 1), row);
-			bool tapValid;
-			const float3 tapPosition = ScreenSpaceLoadViewPosition(view, Depth, source.x, source.y, tapValid);
-			if (!tapValid || abs(-tapPosition.z - centreDepth) > 0.05 * centreDepth)
+			const int cacheRow = row - cache.OriginRow;
+			const int cacheColumn = tx - cache.OriginColumn;
+			const bool cached = SCREEN_SPACE_HALF_CACHE != 0 && cache.Valid && cacheRow >= 0 && cacheRow < HalfCacheRows && cacheColumn >= 0 && cacheColumn < HalfCacheColumns;
+			const int slot = cached ? cacheRow * HalfCacheColumns + cacheColumn : 0;
+#if SCREEN_SPACE_HALF_CACHE
+			const float tapDepth = cached ? HalfCacheDistance[slot] : ScreenSpaceLoadViewDistance(view, Depth, source.x, source.y);
+#else
+			const float tapDepth = ScreenSpaceLoadViewDistance(view, Depth, source.x, source.y);
+#endif
+			if (!(tapDepth != 0.0) || abs(tapDepth - centreDepth) > 0.05 * centreDepth)
 			{
 				continue;
 			}
-			if (dot(encoded.xyz, Normal.Load(int3(source, 0)).xyz) < 0.9)
+#if SCREEN_SPACE_HALF_CACHE
+			const float3 tapNormal = cached ? HalfUnpack(HalfCacheNormal[slot]).xyz : Normal.Load(int3(source, 0)).xyz;
+#else
+			const float3 tapNormal = Normal.Load(int3(source, 0)).xyz;
+#endif
+			if (dot(encoded.xyz, tapNormal) < 0.9)
 			{
 				continue;
 			}
 			const float2 d = float2(source - int2(x, y));
-			const float w = exp(-dot(d, d) * inverseTwoSigma2);
+			const float w = exp2(-dot(d, d) * falloff);
+#if SCREEN_SPACE_HALF_CACHE
+			const float4 tap = cached ? HalfUnpack(HalfCacheReflection[slot]) : Reflection.Load(int3(tx, row, 0));
+#else
 			const float4 tap = Reflection.Load(int3(tx, row, 0));
+#endif
 			const float tapConfidence = max(tap.a, 0.0); // ScreenSpace::RejectedHit counts as a miss.
 			confidence += w * tapConfidence;
 			weights += w;
@@ -573,11 +643,11 @@ float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 	return float4(radianceWeight > 0.0 ? radiance / radianceWeight : float3(0.0, 0.0, 0.0), confidence / weights);
 }
 
-float4 ResolvedReflection(ScreenSpaceView view, int x, int y)
+float4 ResolvedReflection(ScreenSpaceView view, int x, int y, HalfTapCache cache)
 {
 	if (Params[0].SsrHalf != 0u)
 	{
-		return ResolvedHalfReflection(view, x, y);
+		return ResolvedHalfReflection(view, x, y, cache);
 	}
 	const float4 centre = Reflection.Load(int3(x, y, 0));
 	const float4 encoded = Normal.Load(int3(x, y, 0));
@@ -601,9 +671,8 @@ float4 ResolvedReflection(ScreenSpaceView view, int x, int y)
 		const int oy = j / 5 - 2;
 		const int tx = clamp(x + ox * step, 0, int(view.Width) - 1);
 		const int ty = clamp(y + oy * step, 0, int(view.Height) - 1);
-		bool tapValid;
-		const float3 tapPosition = ScreenSpaceLoadViewPosition(view, Depth, tx, ty, tapValid);
-		if (!tapValid || abs(-tapPosition.z - centreDepth) > 0.05 * centreDepth)
+		const float tapDepth = ScreenSpaceLoadViewDistance(view, Depth, tx, ty);
+		if (!(tapDepth != 0.0) || abs(tapDepth - centreDepth) > 0.05 * centreDepth)
 		{
 			continue;
 		}
@@ -663,9 +732,19 @@ float HenyeyGreenstein(float g, float cosTheta)
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void computeMain(uint3 id : SV_DispatchThreadID)
+void computeMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint threadIndex : SV_GroupIndex)
 {
 	const ScreenSpaceView view = ScreenSpaceLoadView(Params);
+	const bool ssrEnabled = Params[0].SsrEnabled != 0u;
+	HalfTapCache halfCache;
+	halfCache.Valid = SCREEN_SPACE_HALF_CACHE != 0 && ssrEnabled && (Params[0].SsrHalf & 3u) == 1u;
+	halfCache.OriginRow = int(group.y * 8u) - HalfCacheApronRows;
+	halfCache.OriginColumn = int(group.x * 4u) - HalfCacheApronColumns;
+	if (halfCache.Valid) // Uniform across the group.
+	{
+		FillHalfTapCache(view, halfCache, threadIndex);
+		GroupMemoryBarrierWithGroupSync();
+	}
 	if (id.x >= view.Width || id.y >= view.Height)
 	{
 		return;
@@ -682,7 +761,6 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const uint debug = Params[0].ReflectionDebug;
 	float3 debugColor = float3(0.0, 0.0, 0.0);
 	bool reflective = false;
-	const bool ssrEnabled = Params[0].SsrEnabled != 0u;
 	float4 reflectionTerm = float4(0.0, 0.0, 0.0, 0.0); // Weight 0: nothing to filter.
 	float reactive = 0.0; // For TAA (Temporal::Reactive): how much this pixel's history is distrusted.
 	const uint planarCount = Params[0].PlanarCount;
@@ -694,7 +772,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		// The screen-space reflection first: where it is (almost) fully confident the fallback
 		// (all but cancelled out of the result) skips its probe lookups (the parallax marches);
 		// the remaining few percent come from the global environment instead.
-		const float4 reflection = ssrEnabled ? ResolvedReflection(view, int(id.x), int(id.y)) : float4(0.0, 0.0, 0.0, 0.0);
+		const float4 reflection = ssrEnabled ? ResolvedReflection(view, int(id.x), int(id.y), halfCache) : float4(0.0, 0.0, 0.0, 0.0);
 		float confidence = max(reflection.a, 0.0);
 		// The surface (shared by the planar lookup and the probes).
 		const uint probeCount = Params[0].ProbeCount;

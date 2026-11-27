@@ -9,7 +9,9 @@
 #include "Engine/Systems/Renderer/GpuScene/RenderObjectDesc.h"
 #include "Engine/Systems/Renderer/Resources/GpuResourceRegistry.h"
 
+#include <array>
 #include <optional>
+#include <span>
 
 namespace Swim::Render
 {
@@ -32,6 +34,13 @@ namespace Swim::Render
 	//
 	// Owner-thread only. Destroyed rows are rewritten as dead (Flags == 0) at the
 	// next import; their index is reused only after lastUse completes.
+	// A world-space axis-aligned box.
+	struct GpuSceneBox
+	{
+		std::array<float, 3> Min{};
+		std::array<float, 3> Max{};
+	};
+
 	class GpuScene
 	{
 
@@ -105,6 +114,18 @@ namespace Swim::Render
 
 		GpuSceneStats GetStats() const;
 
+		// Changes whenever a RenderObjectFlags::Static row is created, destroyed or changed
+		// (or a row gains or loses the flag): what a cached static shadow layer depends on.
+		std::uint64_t GetStaticGeneration() const { return staticGeneration; }
+
+		// Where the shadow-casting non-static objects of the frame last imported changed: the
+		// world bounds of each created, destroyed, moved or edited one (before and after) and
+		// of every deforming one. AllDynamicChanged: too many to list (treat everything as
+		// changed). What a cached shadow redraws its moving casters over.
+		std::span<const GpuSceneBox> GetDynamicChanges() const { return importedChanges; }
+
+		bool AllDynamicChanged() const { return importedAllChanged; }
+
 	  private:
 
 		using Registry = GpuResourceRegistry<RenderObjectTag, Internal::RenderObjectRecord>;
@@ -113,6 +134,13 @@ namespace Swim::Render
 
 		void Settle();
 
+		void TouchStatic(std::uint32_t flags);
+		void NoteChange(std::uint32_t row);
+		std::vector<GpuSceneBox> dynamicChanges;
+		std::vector<GpuSceneBox> importedChanges;
+		bool allChanged = false;
+		bool importedAllChanged = false;
+
 		Registry objects;
 		GpuRecordBuffer<GpuInstanceRecord> instances;
 		GpuRecordBuffer<GpuTransformRecord> transforms;
@@ -120,6 +148,7 @@ namespace Swim::Render
 		std::vector<RenderObjectHandle> settling; // Moved last frame.
 		std::uint32_t rowCount = 0;
 		std::uint64_t frame = 1;
+		std::uint64_t staticGeneration = 0;
 		bool importPending = false;
 		GpuSceneStats last;
 		std::uint64_t totalBytes = 0;

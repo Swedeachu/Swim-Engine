@@ -23,8 +23,14 @@ namespace Swim::Render
 		ScreenSpaceProgram AmbientOcclusion; // SwimScreenSpaceAo
 		ScreenSpaceProgram Blur;			 // SwimScreenSpaceBlur
 		ScreenSpaceProgram Composite;		 // SwimScreenSpaceComposite
+		// SwimScreenSpaceCompositeHalf; optional: the composite with the checkerboard tap cache
+		// (ReflectionSettings::HalfTapCache), used only while it is on.
+		ScreenSpaceProgram CompositeHalf;
 		ScreenSpaceProgram Reflection;		 // SwimScreenSpaceReflection; optional unless reflections are enabled.
 		ScreenSpaceProgram ReflectionTemporal; // SwimScreenSpaceReflectionTemporal; optional (ScreenSpaceFrame::ReflectionTemporal).
+		// SwimScreenSpaceLinearDepth; optional (needs Rhi StorageImageExtendedFormats): the AO
+		// and its blur read a half-precision view distance instead of the depth.
+		ScreenSpaceProgram LinearDepth;
 		// Linear clamp with mips: the composite's probe sampler (a stand-in binding without probes).
 		Rhi::Sampler* ProbeSampler = nullptr;
 		std::string DebugName = "Screen space";
@@ -124,6 +130,20 @@ namespace Swim::Render
 		static Rhi::TextureDesc OutputDesc(std::uint32_t width, std::uint32_t height); // Also the reflection target.
 
 	  private:
+		struct Recording;
+
+		void ValidateInputs(Recording& r) const;
+
+		void ValidateCaptureInputs(Recording& r) const;
+
+		void ValidateReflectionInputs(Recording& r) const;
+		void RecordAmbientOcclusion(Recording& r) const;
+		void RecordReflections(Recording& r) const;
+		void PrepareProbeInputs(Recording& r) const;
+		void PreparePlanarInputs(Recording& r) const;
+		void CreateReflectionTerm(Recording& r) const;
+		void RecordComposite(Recording& r) const;
+		void RecordReflectionTemporal(Recording& r) const;
 
 		ScreenSpaceEffectsDesc desc;
 

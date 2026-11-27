@@ -98,6 +98,32 @@ else()
 endif()
 option(SWIM_SHADER_DEBUG_INFO "Compile SPIR-V shaders with source-level debug info for GPU profilers" ${SWIM_SHADER_DEBUG_INFO_DEFAULT})
 option(SWIM_ENABLE_VULKAN_RHI "Compile the modern Vulkan RHI backend" ON)
+option(SWIM_ENABLE_D3D12_RHI "Compile the Direct3D 12 RHI backend (Windows; selected with --rhi=d3d12)" ON)
+set(SWIM_SLANG_DXIL_PROFILE "sm_6_8" CACHE STRING
+	"Shader model of the DXIL shaders; below sm_6_8 the draw base comes from root constants")
+
+# DXIL is compiled by Slang through the Windows SDK's DXC (dxcompiler.dll, dxil.dll).
+set(SWIM_SLANG_DXC_DIR "")
+if(WIN32 AND SWIM_ENABLE_D3D12_RHI)
+	set(SWIM_DXC_CANDIDATES "")
+	if(DEFINED ENV{WindowsSdkDir} AND DEFINED ENV{WindowsSDKVersion})
+		file(TO_CMAKE_PATH "$ENV{WindowsSdkDir}bin/$ENV{WindowsSDKVersion}x64" SWIM_DXC_CANDIDATES)
+	endif()
+	file(GLOB SWIM_SDK_BIN_DIRECTORIES LIST_DIRECTORIES true "C:/Program Files (x86)/Windows Kits/10/bin/10.*")
+	list(SORT SWIM_SDK_BIN_DIRECTORIES COMPARE NATURAL ORDER DESCENDING)
+	foreach(SWIM_SDK_BIN IN LISTS SWIM_SDK_BIN_DIRECTORIES)
+		list(APPEND SWIM_DXC_CANDIDATES "${SWIM_SDK_BIN}/x64")
+	endforeach()
+	foreach(SWIM_DXC_CANDIDATE IN LISTS SWIM_DXC_CANDIDATES)
+		if(EXISTS "${SWIM_DXC_CANDIDATE}/dxcompiler.dll" AND EXISTS "${SWIM_DXC_CANDIDATE}/dxil.dll")
+			set(SWIM_SLANG_DXC_DIR "${SWIM_DXC_CANDIDATE}")
+			break()
+		endif()
+	endforeach()
+	if(NOT SWIM_SLANG_DXC_DIR)
+		message(WARNING "No Windows SDK DXC found: the Direct3D 12 backend is built without DXIL shaders")
+	endif()
+endif()
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
 option(SWIM_DEPLOY_ASSETS "Copy the engine Assets/ next to each engine executable after each build (packaged runs); development builds read the repository's Assets/ directly" OFF)
 
@@ -590,8 +616,16 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_runtime_shader(ScreenAaWeights SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=2)
 	swim_add_runtime_shader(ScreenAaBlend SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=3)
 	swim_add_runtime_shader(ScreenSharpen SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=4)
+	swim_add_runtime_shader(ScreenBlurDown SOURCE Source/Shaders/Slang/PostProcess/ScreenBlur.slang DEFINES SCREEN_BLUR_PASS=0)
+	swim_add_runtime_shader(ScreenBlurUp SOURCE Source/Shaders/Slang/PostProcess/ScreenBlur.slang DEFINES SCREEN_BLUR_PASS=1)
+	swim_add_runtime_shader(ScreenBlurComposite SOURCE Source/Shaders/Slang/PostProcess/ScreenBlur.slang DEFINES SCREEN_BLUR_PASS=2)
 	# Back-face depth (screen-space reflection thickness) from the Forward+ source.
 	swim_add_runtime_shader(ForwardBackDepth SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang DEFINES FORWARD_DEPTH_ONLY=1 FORWARD_BACK_DEPTH=1)
+	# Multisampled Forward+ (RenderSettings::MsaaSamples): the alpha-to-coverage depth prepass
+	# and the resolve to the single-sample targets.
+	swim_add_runtime_shader(ForwardDepthCoverage SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang DEFINES FORWARD_DEPTH_ONLY=1 FORWARD_DEPTH_COVERAGE=1)
+	swim_add_runtime_shader(ForwardMsaaResolve SOURCE Source/Shaders/Slang/ForwardPlus/ForwardMsaaResolve.slang)
+	swim_add_runtime_shader(SkyCubemap SOURCE Source/Shaders/Slang/Runtime/SkyBackground.slang DEFINES SKY_CUBEMAP=1)
 	swim_add_runtime_shader(VolumetricCloudsEnvironment SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_ENVIRONMENT=1)
 	# Reflection probes (Engine/Systems/Renderer/Reflections): capture resolve and a
 	# prefilter that keeps the captured distance in alpha.
@@ -723,6 +757,19 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		RUNTIME_NAME ScreenSpaceBlur
 		REQUIRED
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceBlur.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimScreenSpaceCompositeHalf
+		RUNTIME_NAME ScreenSpaceCompositeHalf
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+		DEFINES SCREEN_SPACE_HALF_CACHE=1
+	)
+	swim_add_slang_program(SwimScreenSpaceLinearDepth
+		RUNTIME_NAME ScreenSpaceLinearDepth
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceLinearDepth.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
@@ -865,6 +912,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimForwardOpaqueDeferred_SPIRV}" "${SwimForwardOpaqueDeferred_REFLECTION}"
 			"${SwimForwardLocalLights_SPIRV}" "${SwimForwardLocalLights_REFLECTION}"
 			"${SwimScreenSpaceReflectionTemporal_SPIRV}" "${SwimScreenSpaceReflectionTemporal_REFLECTION}"
+			"${SwimScreenSpaceLinearDepth_SPIRV}" "${SwimScreenSpaceLinearDepth_REFLECTION}"
+			"${SwimScreenSpaceCompositeHalf_SPIRV}" "${SwimScreenSpaceCompositeHalf_REFLECTION}"
 			"${SwimForwardTransparentSort_SPIRV}" "${SwimForwardTransparentSort_REFLECTION}"
 			"${SwimShadowDepth_SPIRV}" "${SwimShadowDepth_REFLECTION}"
 			"${SwimShadowMasked_SPIRV}" "${SwimShadowMasked_REFLECTION}"
@@ -1133,6 +1182,18 @@ if(SWIM_ENABLE_VULKAN_RHI AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	)
 endif()
 
+# The Direct3D 12 backend beside Vulkan (Windows): RenderDevice selects it with --rhi=d3d12
+# and falls back to Vulkan. Only the Windows SDK's own libraries.
+if(WIN32 AND SWIM_ENABLE_D3D12_RHI AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+	file(GLOB_RECURSE SWIM_D3D12_RHI_SOURCES
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/D3D12/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/D3D12/*.h
+	)
+	set(SWIM_D3D12_RHI_AVAILABLE TRUE)
+	set(SWIM_D3D12_RHI_PRIVATE_LIBS d3d12 dxgi dxguid)
+	set(SWIM_D3D12_RHI_PRIVATE_DEFINITIONS SWIM_RHI_D3D12=1)
+endif()
+
 # Generic physics is part of the cross-platform foundation. Keep the concrete
 # PhysX implementation behind the legacy/runtime gate, but compile this API and
 # its shared backend contract on Linux too so portable C++ errors are caught
@@ -1323,6 +1384,9 @@ endif()
 if(SWIM_VULKAN_RHI_AVAILABLE)
 	list(APPEND SWIM_ENGINE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})
 endif()
+if(SWIM_D3D12_RHI_AVAILABLE)
+	list(APPEND SWIM_ENGINE_SOURCES ${SWIM_D3D12_RHI_SOURCES})
+endif()
 
 # The sandbox game: scenes, behaviours and UI panels (Source/Game).
 file(GLOB_RECURSE SWIM_GAME_SOURCES
@@ -1396,6 +1460,9 @@ target_compile_definitions(SwimEngineRuntime
 )
 if(SWIM_VULKAN_RHI_AVAILABLE)
 	target_compile_definitions(SwimEngineRuntime PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
+endif()
+if(SWIM_D3D12_RHI_AVAILABLE)
+	target_compile_definitions(SwimEngineRuntime PRIVATE ${SWIM_D3D12_RHI_PRIVATE_DEFINITIONS})
 endif()
 
 # Compile options shared by the runtime library and the sandbox executable.
@@ -1483,6 +1550,9 @@ endif()
 if(SWIM_VULKAN_RHI_AVAILABLE)
 	target_link_libraries(SwimEngineRuntime PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
 endif()
+if(SWIM_D3D12_RHI_AVAILABLE)
+	target_link_libraries(SwimEngineRuntime PRIVATE ${SWIM_D3D12_RHI_PRIVATE_LIBS})
+endif()
 if(SWIM_PHYSX_BACKEND_AVAILABLE)
 	target_link_libraries(SwimEngineRuntime PRIVATE Swim::PhysX)
 	if(TARGET SwimPhysXBuild)
@@ -1517,6 +1587,9 @@ function(swim_configure_engine_executable target)
 		set(dev_paths "DevAudioRoot=${SWIM_DEV_AUDIO_ROOT}\n")
 		if(TARGET SwimSlangCompiler)
 			string(APPEND dev_paths "SlangCompiler=$<TARGET_FILE:SwimSlangCompiler>\nShaderSources=${SWIM_RUNTIME_SHADER_SOURCE_MANIFEST}\n")
+			if(SWIM_SLANG_DXC_DIR)
+				string(APPEND dev_paths "DxcDirectory=${SWIM_SLANG_DXC_DIR}\nDxilProfile=${SWIM_SLANG_DXIL_PROFILE}\n")
+			endif()
 		endif()
 		file(GENERATE OUTPUT "$<TARGET_FILE_DIR:${target}>/DevPaths.cfg" CONTENT "${dev_paths}")
 	endif()

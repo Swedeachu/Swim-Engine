@@ -21,6 +21,7 @@
 #include "Engine/Systems/Renderer/Runtime/MaterialLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/MeshLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/RenderDevice.h"
+#include "Engine/Runtime/PipelineCacheFile.h"
 #include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
 #include "Engine/Systems/Scene/RenderExtraction/Runtime/SceneRenderBridge.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
@@ -83,6 +84,31 @@ namespace Engine
 
 	namespace
 	{
+
+		// What the backend recorded about a lost device: the failing operation, its native
+		// result and any fault report (unfinished work, faulting address).
+		void LogDeviceLoss(const Swim::Rhi::Device& device)
+		{
+			const auto diagnostics = device.GetDeviceDiagnostics();
+
+			if (!diagnostics)
+			{
+				return;
+			}
+
+			const auto loss = diagnostics->Snapshot();
+			char result[16];
+			std::snprintf(result, sizeof(result), "0x%08x", static_cast<unsigned>(loss.NativeResult));
+			char reason[16];
+			std::snprintf(reason, sizeof(reason), "0x%08x", static_cast<unsigned>(loss.Fault.NativeResult));
+			std::cerr << "[Render] Device lost in " << loss.Operation << " (" << result << "), " << loss.Fault.Description << " (" << reason
+					  << ")\n";
+
+			for (const auto& entry : loss.Fault.Entries)
+			{
+				std::cerr << "[Render]   " << entry << '\n';
+			}
+		}
 
 		int ReportLifecycleFailure(std::string_view phase, std::string_view systemName, int result)
 		{
@@ -167,9 +193,10 @@ namespace Engine
 
 	bool SwimEngine::ValidateBackendConfiguration()
 	{
-		if (graphicsBackend != GraphicsBackend::Vulkan)
+		if (graphicsBackend != GraphicsBackend::Vulkan && graphicsBackend != GraphicsBackend::D3D12)
 		{
-			std::cerr << "[Engine] Graphics backend '" << ToString(graphicsBackend) << "' has no RHI implementation yet; use vulkan.\n";
+			std::cerr << "[Engine] Graphics backend '" << ToString(graphicsBackend)
+					  << "' has no RHI implementation; use vulkan or d3d12.\n";
 			return false;
 		}
 
@@ -306,6 +333,33 @@ namespace Engine
 
 	int SwimEngine::Init()
 	{
+		if (const int result = InitCoreServices(); result != 0)
+		{
+			return result;
+		}
+
+		if (const int result = InitPhysics(); result != 0)
+		{
+			return result;
+		}
+
+		if (const int result = InitPresentation(); result != 0)
+		{
+			return result;
+		}
+
+		if (const int result = InitScenes(); result != 0)
+		{
+			return result;
+		}
+
+		ApplySettings();
+
+		return 0;
+	}
+
+	int SwimEngine::InitCoreServices()
+	{
 		jobSystem = std::make_unique<Swim::Jobs::JobSystem>();
 		Swim::Jobs::JobSystemDesc jobDesc{};
 		jobDesc.BlockingThreads = 1;
@@ -359,6 +413,11 @@ namespace Engine
 		}
 #endif
 
+		return 0;
+	}
+
+	int SwimEngine::InitPhysics()
+	{
 		inputSystem = std::make_unique<Swim::Input::InputSystem>();
 		inputSystem->Reset();
 		actionMap = std::make_unique<Swim::Input::ActionMap>();
@@ -396,6 +455,11 @@ namespace Engine
 			return ReportLifecycleFailure("Init", "PhysicsSystem", result);
 		}
 
+		return 0;
+	}
+
+	int SwimEngine::InitPresentation()
+	{
 		if (config.Render)
 		{
 			if (const int result = InitRenderer(); result != 0)
@@ -438,6 +502,11 @@ namespace Engine
 			}
 		}
 
+		return 0;
+	}
+
+	int SwimEngine::InitScenes()
+	{
 		// Scenes consume every service above, so they come last.
 		SceneServices services;
 		services.Files = &platformSystem->GetFileSystem();
@@ -510,6 +579,11 @@ namespace Engine
 			inputSystem->ProcessWindowEvent(initialWindowEvent);
 		}
 
+		return 0;
+	}
+
+	void SwimEngine::ApplySettings()
+	{
 		RegisterEngineCommands();
 		windowSettings = std::make_unique<WindowSettings>(*commandRegistry, platformSystem->GetWindowSystem(), engineWindow.get(), config.Window);
 		framePacing = std::make_unique<FramePacing>(*commandRegistry);
@@ -561,7 +635,6 @@ namespace Engine
 		}
 
 		commandRegistry->SetStartupComplete();
-		return 0;
 	}
 
 	int SwimEngine::InitRenderer()
@@ -572,6 +645,7 @@ namespace Engine
 			deviceDesc.Window = engineWindow.get();
 			deviceDesc.Width = surfaceWidth;
 			deviceDesc.Height = surfaceHeight;
+			deviceDesc.Api = graphicsBackend == GraphicsBackend::D3D12 ? Swim::Rhi::GraphicsApi::D3D12 : Swim::Rhi::GraphicsApi::Vulkan;
 			deviceDesc.VSync = config.VSync;
 			deviceDesc.FramesInFlight = config.FramesInFlight;
 			deviceDesc.Adapter = config.Adapter;
@@ -585,6 +659,8 @@ namespace Engine
 					  << (renderDevice->GetPresentStats().CrossAdapter ? " (the display is on another adapter: presents cross adapters)" : "")
 					  << ", validation "
 					  << (renderDevice->IsValidationEnabled() ? "on" : "off") << '\n';
+			LoadPipelineCacheFile(renderDevice->GetDevice(),
+				platformSystem->GetFileSystem().GetCacheRoot() / PipelineCacheFileName(renderDevice->GetDevice()));
 
 			FrameRendererDesc rendererDesc;
 			const auto& files = platformSystem->GetFileSystem();
@@ -632,6 +708,16 @@ namespace Engine
 			reloadDesc.Compiler = files.GetDevPath("SlangCompiler");
 			reloadDesc.Sources = files.GetDevPath("ShaderSources");
 			reloadDesc.CacheRoot = files.GetCacheRoot() / "Shaders";
+
+			if (graphicsBackend == GraphicsBackend::D3D12)
+			{
+				reloadDesc.DxcDirectory = files.GetDevPath("DxcDirectory");
+
+				if (const auto profile = files.GetDevPath("DxilProfile"); !profile.empty())
+				{
+					reloadDesc.DxilProfile = profile.string();
+				}
+			}
 			shaderHotReload = std::make_unique<ShaderHotReload>(reloadDesc, *commandRegistry, *frameRenderer);
 		}
 
@@ -674,7 +760,8 @@ namespace Engine
 		const auto& s = frameRenderer->GetStats();
 		std::cout << "[Render] frame " << s.Frame << ": " << s.Width << "x" << s.Height << ", CPU " << s.CpuMilliseconds << " ms, GPU "
 				  << (s.GpuTimingsAvailable ? std::to_string(s.GpuMilliseconds) + " ms" : std::string("n/a")) << " (" << s.Passes
-				  << " passes), probes " << s.ReflectionProbes << " active / " << s.ReflectionProbeFaces << " faces captured\n";
+				  << " passes), probes " << s.ReflectionProbes << " active / " << s.ReflectionProbeFaces << " faces captured, shadow views "
+				  << s.ShadowViewsRendered << " rendered / " << s.ShadowViews << ", casters " << s.ShadowCasters << "\n";
 
 		for (std::uint32_t i = 0; i < s.TopPassCount; ++i)
 		{
@@ -691,714 +778,6 @@ namespace Engine
 
 		console = std::make_unique<RuntimeConsole>(*commandRegistry);
 		consoleOverlay = std::make_unique<RuntimeConsoleOverlay>(*uiRuntime, *console);
-	}
-
-	void SwimEngine::RegisterEngineCommands()
-	{
-		auto& commands = *commandRegistry;
-		commands
-			.AddInt("render_upload_budget_mb", 16, 1, 1024, "Megabytes streaming buffers upload per frame", "Video/Rendering",
-				Swim::Commands::VariableFlags::Saved)
-			.Subscribe(
-				[this](const Swim::Commands::ConsoleVariable& variable)
-				{
-					if (renderServices.Settings)
-					{
-						renderServices.Settings->StreamingUploadBudget = std::uint64_t(variable.GetInt()) << 20;
-					}
-				});
-		commands.Register({ "resource_stats", "Prints live GPU resources: bindless slots, textures, meshes, materials, pending releases",
-							  "Video/Rendering", "" },
-			[this](const std::vector<std::string>&)
-			{
-				if (!renderServices.Renderer)
-				{
-					std::cout << "No renderer.\n";
-					return;
-				}
-
-				const auto& renderer = *renderServices.Renderer;
-				const auto bindless = renderer.GetBindless().GetStats();
-				const auto residency = renderer.GetResidency().GetStats();
-				const auto geometry = renderer.GetGeometry().GetStats();
-				const auto meshes = renderer.GetMeshes().GetStats();
-				std::cout << "bindless textures " << bindless.LiveTextures << "/" << bindless.TextureCapacity << " (retiring "
-						  << bindless.RetiringTextures << "), samplers " << bindless.LiveSamplers << "/" << bindless.SamplerCapacity << "\n"
-						  << "residency: resident " << residency.Resident << ", bindless " << residency.BindlessTextures
-						  << ", waiting for a slot " << residency.BindlessPending << ", queued " << residency.Queued << ", failed "
-						  << residency.Failed << "\n"
-						  << "geometry: resident " << geometry.ResidentMeshes << ", retiring " << geometry.RetiringMeshes << ", pending "
-						  << geometry.PendingMeshes << "\n"
-						  << "mesh library: meshes " << meshes.Meshes << " (resident " << meshes.ResidentMeshes << "), textures "
-						  << meshes.Textures << " (resident " << meshes.ResidentTextures << "), pending releases " << meshes.PendingReleases
-						  << ", replaced names " << meshes.Replacements << "\n"
-						  << "materials " << renderer.GetMaterials().GetCount() << "\n";
-			});
-		commands.Register("play",
-			[this](const std::vector<std::string>&)
-			{
-				stateMachine.Play();
-			});
-		commands.Register("pause",
-			[this](const std::vector<std::string>&)
-			{
-				stateMachine.Pause();
-			});
-		commands.Register("resume",
-			[this](const std::vector<std::string>&)
-			{
-				stateMachine.Resume();
-			});
-		commands.Register("stop",
-			[this](const std::vector<std::string>&)
-			{
-				stateMachine.Stop();
-			});
-		commands.Register("step",
-			[this](const std::vector<std::string>& arguments)
-			{
-				std::uint32_t steps = 1;
-
-				if (!arguments.empty())
-				{
-					try
-					{
-						steps = static_cast<std::uint32_t>(std::max(1, std::stoi(arguments.front())));
-					}
-					catch (...)
-					{
-					}
-				}
-
-				if (stateMachine.IsPlaying())
-				{
-					stateMachine.Pause();
-				}
-
-				clock.Step(steps);
-			});
-		commands.Register("timescale",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (!arguments.empty())
-				{
-					try
-					{
-						clock.SetTimeScale(std::stod(arguments.front()));
-					}
-					catch (...)
-					{
-					}
-				}
-
-			});
-		commands.Register("scene",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (!arguments.empty())
-				{
-					sceneSystem->RequestScene(arguments.front());
-				}
-
-			});
-		commands.Register("reload",
-			[this](const std::vector<std::string>&)
-			{
-				sceneSystem->RequestReload();
-			});
-		commands.Register("capture",
-			[this](const std::vector<std::string>& arguments)
-			{
-				RequestCapture(arguments.empty() ? std::filesystem::path("capture.ppm") : std::filesystem::path(arguments.front()));
-			});
-		// capture.sequence <prefix> <after frames> <count>: captures `count` consecutive frames,
-		// starting `after frames` from now, as <prefix>_000.ppm, <prefix>_001.ppm, ... (temporal
-		// artefacts - ghosting, jitter - are only visible frame to frame).
-		commands.Register("capture.sequence",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (arguments.size() < 3)
-				{
-					throw std::invalid_argument("usage: capture.sequence <prefix> <after frames> <count>");
-				}
-
-				captureSequencePrefix = arguments[0];
-				captureSequenceStart = totalFrames + static_cast<std::uint64_t>(std::max(0, std::stoi(arguments[1])));
-				captureSequenceCount = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[2])));
-				captureSequenceDone = 0;
-			});
-		// after <frames> <command...>: runs a console line that many frames from now (time
-		// freezes and resumes, toggles mid-sequence: "timescale 0" then "after 40 timescale 1"
-		// holds a moving object in place while the reflections settle).
-		commands.Register("after",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (arguments.size() < 2)
-				{
-					throw std::invalid_argument("usage: after <frames> <command...>");
-				}
-
-				std::string line;
-
-				for (std::size_t i = 1; i < arguments.size(); ++i)
-				{
-					line += (i > 1 ? " " : "") + arguments[i];
-				}
-
-				deferredCommands.push_back({ totalFrames + static_cast<std::uint64_t>(std::max(0, std::stoi(arguments[0]))), line });
-			});
-		// camera.cut: drop temporal history on the next frame (as a teleport would).
-		commands.Register("camera.cut",
-			[this](const std::vector<std::string>&)
-			{
-				cameraSystem->RequestCameraCut();
-			});
-		commands.Register("camera",
-			[this](const std::vector<std::string>& arguments)
-			{
-				// camera <eye x y z> [<target x y z>]
-				std::array<float, 6> values{ 0, 0, 0, 0, 0, 0 };
-
-				try
-				{
-					for (std::size_t i = 0; i < std::min<std::size_t>(arguments.size(), values.size()); ++i)
-					{
-						values[i] = std::stof(arguments[i]);
-					}
-				}
-				catch (...)
-				{
-					return;
-				}
-
-				auto& camera = cameraSystem->GetCamera();
-				const glm::vec3 eye{ values[0], values[1], values[2] };
-
-				if (arguments.size() >= 6)
-				{
-					camera.LookAt(eye, { values[3], values[4], values[5] });
-				}
-				else
-				{
-					camera.SetPosition(eye);
-				}
-
-				cameraSystem->RequestCameraCut();
-				cameraLocked = true;
-			});
-		// render.stats: the last frame's CPU/GPU times, the costliest GPU passes and the
-		// reflection probe work; render.stats <n>: print it every n frames (0 stops).
-		commands.Register("render.stats",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (!arguments.empty())
-				{
-					try
-					{
-						statsInterval = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[0])));
-					}
-					catch (...)
-					{
-						statsInterval = 0;
-					}
-
-					return;
-				}
-
-				PrintRenderStats();
-			});
-		// profile <frames> [warmup] [csv path] [label] [quit]: measures every CPU zone, renderer
-		// phase and GPU pass over <frames> frames (after [warmup]) and prints the costliest;
-		// with a path, appends the full table to that CSV; "quit" ends the run after it.
-		commands.Register("profile",
-			[this](const std::vector<std::string>& arguments)
-			{
-				const auto number = [&](std::size_t i, std::uint32_t fallback)
-				{
-					try
-					{
-						return i < arguments.size() ? static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[i]))) : fallback;
-					}
-					catch (...)
-					{
-						return fallback;
-					}
-				};
-				const std::uint32_t frames = number(0, 240);
-				const std::uint32_t warmup = number(1, 60);
-				const std::filesystem::path csv = arguments.size() > 2 && arguments[2] != "-" ? std::filesystem::path(arguments[2]) : std::filesystem::path();
-				const std::string label = arguments.size() > 3 ? arguments[3] : std::string();
-				quitAfterProfile = arguments.size() > 4 && arguments[4] == "quit";
-				profiler.Begin(warmup, frames, csv, label);
-				std::cout << "[Profile] capturing " << frames << " frames after " << warmup << " warm-up frames\n";
-			});
-		// render.toggles [filter]: every profiling switch and its state; render.toggle
-		// <name|group.*|all> [0|1]: set (or flip) switches.
-		commands.Register("render.toggles",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (!renderToggles)
-				{
-					return;
-				}
-
-				const std::string filter = arguments.empty() ? std::string() : arguments[0];
-
-				for (const auto& toggle : renderToggles->List())
-				{
-					if (!filter.empty() && toggle.Name.find(filter) == std::string::npos)
-					{
-						continue;
-					}
-
-					std::cout << "[Toggle] " << (toggle.Get() ? "on  " : "off ") << toggle.Name << "  - " << toggle.Description << '\n';
-				}
-
-			});
-		commands.Register("render.toggle",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (!renderToggles || arguments.empty())
-				{
-					throw std::invalid_argument("usage: render.toggle <name|group.*|all> [0|1]");
-				}
-
-				bool on = true;
-
-				if (arguments.size() > 1)
-				{
-					on = arguments[1] != "0" && arguments[1] != "off" && arguments[1] != "false";
-				}
-				else if (const auto current = renderToggles->Get(arguments[0]))
-				{
-					on = !*current;
-				}
-
-				const auto changed = renderToggles->Set(arguments[0], on);
-
-				if (changed == 0)
-				{
-					throw std::invalid_argument("no render toggle matches " + arguments[0] + " (see render.toggles)");
-				}
-
-				std::cout << "[Toggle] " << arguments[0] << " -> " << (on ? "on" : "off") << " (" << changed << ")\n";
-			});
-		// render.set [<knob> <value>]: the numeric quality knobs of the render settings, live
-		// (bench sweeps them: "tile32=render.set cluster.tile 32"). No arguments: lists them.
-		commands.Register("render.set",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (!renderServices.Settings)
-				{
-					throw std::invalid_argument("render.set needs the renderer");
-				}
-
-				auto& s = *renderServices.Settings;
-				auto& ssr = s.ScreenSpace.Reflections;
-				auto& ao = s.ScreenSpace.AmbientOcclusion;
-				auto& shadow = s.Shadow;
-				auto& probes = s.ReflectionProbes;
-				auto& planar = s.PlanarReflections;
-				std::uint32_t ssrHalf = ssr.HalfResolution ? 1u : 0u;
-				std::uint32_t aoHalf = ao.HalfResolution ? 1u : 0u;
-				struct Knob
-				{
-					const char* Name;
-					float* F = nullptr;
-					std::uint32_t* U = nullptr;
-				};
-				const Knob knobs[] = {
-					{ "cluster.tile", nullptr, &s.ClusterTileSize },
-					{ "cluster.slices", nullptr, &s.ClusterSlices },
-					{ "cluster.far", &s.ClusterFar },
-					{ "ssr.steps", nullptr, &ssr.MaxSteps },
-					{ "ssr.stride", &ssr.Stride },
-					{ "ssr.refine", nullptr, &ssr.RefineSteps },
-					{ "ssr.distance", &ssr.MaxDistance },
-					{ "ssr.roughness", &ssr.MaxRoughness },
-					{ "ssr.half", nullptr, &ssrHalf },
-					{ "ao.half", nullptr, &aoHalf },
-					{ "reflections.blend", &ssr.TemporalBlend },
-					{ "ao.slices", nullptr, &ao.SliceCount },
-					{ "ao.steps", nullptr, &ao.StepCount },
-					{ "ao.radius", &ao.Radius },
-					{ "shadow.cascade", nullptr, &shadow.CascadeResolution },
-					{ "shadow.spot", nullptr, &shadow.SpotResolution },
-					{ "shadow.point", nullptr, &shadow.PointResolution },
-					{ "shadow.spots", nullptr, &shadow.MaxSpotShadows },
-					{ "shadow.points", nullptr, &shadow.MaxPointShadows },
-					{ "shadow.pcf", nullptr, &shadow.PcfRadius },
-					{ "probes.resolution", nullptr, &probes.Resolution },
-					{ "probes.faces", nullptr, &probes.FacesPerFrame },
-					{ "probes.filters", nullptr, &probes.FiltersPerFrame },
-					{ "probes.idle", nullptr, &probes.IdleRefreshFrames },
-					{ "probes.samples", nullptr, &probes.PrefilterSamples },
-					{ "probes.cull", &probes.CullDistance },
-					{ "planar.planes", nullptr, &planar.MaxPlanes },
-					{ "planar.atlas", nullptr, &planar.AtlasResolution },
-					{ "planar.captures", nullptr, &planar.CapturesPerFrame },
-					{ "planar.supersample", nullptr, &planar.Supersample },
-					{ "planar.scale", &planar.ResolutionScale },
-					{ "planar.min-screen", &planar.MinScreenFraction },
-					{ "planar.ssr-fallback", &planar.SsrFallbackScreenFraction },
-					{ "planar.sphere-cos", &planar.SphereMinCosine },
-					{ "planar.motion", &planar.MotionTolerance },
-					{ "planar.max-age", &planar.MaxAgeSeconds },
-					{ "planar.cull", &planar.CullDistance },
-				};
-
-				if (arguments.size() < 2)
-				{
-					for (const auto& knob : knobs)
-					{
-						std::cout << "[Set] " << knob.Name << " = " << (knob.F ? *knob.F : static_cast<float>(*knob.U)) << "\n";
-					}
-
-					return;
-				}
-
-				for (const auto& knob : knobs)
-				{
-					if (arguments[0] == knob.Name)
-					{
-						const float value = std::stof(arguments[1]);
-
-						if (knob.F)
-						{
-							*knob.F = value;
-						}
-						else
-						{
-							*knob.U = static_cast<std::uint32_t>(std::max(0.0f, value));
-						}
-
-						ssr.HalfResolution = ssrHalf != 0u;
-						ao.HalfResolution = aoHalf != 0u;
-						std::cout << "[Set] " << knob.Name << " -> " << value << "\n";
-						return;
-					}
-				}
-
-				throw std::invalid_argument("unknown render knob " + arguments[0] + " (render.set lists them)");
-			});
-		// bench <csv> <frames> <warmup> <ablate|base> <scenario>[|<scenario>...] [quit]
-		// A scenario is "<label>=<command>[;<command>...]" (e.g. "atrium=sandbox.view 5").
-		// For each scenario: its commands, a baseline capture, and with "ablate" one capture
-		// per profiling switch turned off alone (and back on after). Captures append to the CSV
-		// labelled "<scenario>|baseline" or "<scenario>|-<switch>".
-		commands.Register("bench",
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (arguments.size() < 5)
-				{
-					throw std::invalid_argument("usage: bench <csv> <frames> <warmup> <ablate|base> <label=cmd;cmd|label=cmd> [quit]");
-				}
-
-				benchCsv = arguments[0];
-				benchFrames = static_cast<std::uint32_t>(std::max(1, std::stoi(arguments[1])));
-				benchWarmup = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[2])));
-				const bool ablate = arguments[3] == "ablate";
-				// The scenario list may have been split on spaces: join the rest.
-				std::string scenarios;
-				benchQuit = false;
-
-				for (std::size_t i = 4; i < arguments.size(); ++i)
-				{
-					if (i + 1 == arguments.size() && arguments[i] == "quit")
-					{
-						benchQuit = true;
-						break;
-					}
-
-					scenarios += (scenarios.empty() ? "" : " ") + arguments[i];
-				}
-
-				benchSteps.clear();
-				benchNext = 0;
-				std::size_t start = 0;
-
-				while (start <= scenarios.size())
-				{
-					const auto end = std::min(scenarios.find('|', start), scenarios.size());
-					const std::string scenario = scenarios.substr(start, end - start);
-					start = end + 1;
-
-					if (scenario.empty())
-					{
-						continue;
-					}
-
-					const auto equals = scenario.find('=');
-					const std::string label = equals == std::string::npos ? scenario : scenario.substr(0, equals);
-					std::string setup = equals == std::string::npos ? std::string() : scenario.substr(equals + 1);
-					// Commands separated by ';' run one after another.
-					std::size_t from = 0;
-
-					while (from <= setup.size())
-					{
-						const auto to = std::min(setup.find(';', from), setup.size());
-						benchSteps.push_back({ setup.substr(from, to - from), "", "" });
-						from = to + 1;
-					}
-
-					benchSteps.push_back({ "", label + "|baseline", "" });
-
-					if (ablate && renderToggles)
-					{
-						for (const auto& toggle : renderToggles->List())
-						{
-							if (!toggle.Get())
-							{
-								continue; // Already off in this scenario.
-							}
-
-							benchSteps.push_back({ "render.toggle " + toggle.Name + " 0", label + "|-" + toggle.Name,
-								"render.toggle " + toggle.Name + " 1" });
-						}
-					}
-				}
-
-				std::cout << "[Bench] " << benchSteps.size() << " steps\n";
-			});
-		commands.Register("quit",
-			[this](const std::vector<std::string>&)
-			{
-				Quit();
-			});
-		RegisterInputCommands();
-		commands.Register({ "exec", "Runs every line of a config file", "Console", "<file>" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (arguments.empty())
-				{
-					throw std::invalid_argument("usage: exec <file>");
-				}
-
-				std::filesystem::path path(arguments[0]);
-
-				if (path.is_relative() && !std::filesystem::exists(path))
-				{
-					path = platformSystem->GetFileSystem().GetUserDataRoot() / path;
-				}
-
-				if (!commandRegistry->ExecuteFile(path))
-				{
-					throw std::invalid_argument("cannot read " + path.string());
-				}
-			});
-		commands.Register({ "config_save", "Writes the saved settings to the user config file now", "Console", "[file]" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				const auto path = arguments.empty() ? GetUserConfigPath() : std::filesystem::path(arguments[0]);
-
-				if (path.empty() || !commandRegistry->SaveConfig(path))
-				{
-					throw std::invalid_argument("could not write the config file");
-				}
-
-				if (arguments.empty())
-				{
-					commandRegistry->MarkConfigSaved();
-				}
-
-				std::cout << "[Config] Saved " << path.string() << '\n';
-			});
-		commands.Register({ "cvar_list", "Lists console variables and their values", "Console", "[filter]" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				const std::string filter = arguments.empty() ? std::string() : arguments[0];
-
-				for (const auto* variable : commandRegistry->GetVariables())
-				{
-					const auto& desc = variable->GetDesc();
-
-					if (!filter.empty() && variable->GetName().find(filter) == std::string::npos &&
-						desc.Category.find(filter) == std::string::npos)
-					{
-						continue;
-					}
-
-					std::cout << variable->GetName() << " = " << Swim::Commands::CommandRegistry::QuoteArgument(variable->ToString())
-							  << (variable->IsDefault() ? "" : " *") << (variable->IsRestartPending() ? " (restart)" : "") << "  ["
-							  << desc.Category << "] " << desc.Description << '\n';
-				}
-			});
-		commands.Register({ "cvar_reset", "Resets a console variable (or all) to its default", "Console", "<name|all>" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (arguments.empty())
-				{
-					throw std::invalid_argument("usage: cvar_reset <name|all>");
-				}
-
-				if (arguments[0] == "all")
-				{
-					for (auto* variable : commandRegistry->GetVariables())
-					{
-						if (!Swim::Commands::HasFlag(variable->GetDesc().Flags, Swim::Commands::VariableFlags::ReadOnly))
-						{
-							variable->Reset();
-						}
-					}
-
-					return;
-				}
-
-				auto* variable = commandRegistry->FindVariable(arguments[0]);
-
-				if (!variable)
-				{
-					throw std::invalid_argument("no console variable " + arguments[0]);
-				}
-
-				variable->Reset();
-			});
-	}
-
-	namespace
-	{
-		// 0..100 -> look multiplier: 50 is 1, 13 is about 0.17, 100 about 4.1.
-		float LookSensitivityScale(double value)
-		{
-			const double t = std::clamp(value, 0.0, 100.0) / 100.0 * 0.6 + 0.2;
-			return static_cast<float>(t * t * t * 8.0);
-		}
-	} // namespace
-
-	void SwimEngine::RegisterInputCommands()
-	{
-		using Swim::Commands::VariableFlags;
-		auto& commands = *commandRegistry;
-		auto& actions = *actionMap;
-		actions.SetChangedCallback(
-			[this]()
-			{
-				commandRegistry->MarkConfigDirty();
-			});
-		commands.SetConfigWriter("bindings",
-			[this](std::string& out)
-			{
-				actionMap->WriteConfig(out);
-			});
-
-		auto& sensitivity = commands.AddFloat("look_sensitivity", config.LookSensitivityDefault, 0.0, 100.0, "Mouse look speed (0 to 100)",
-			"Controls/Mouse", VariableFlags::Saved);
-		auto& invert = commands.AddBool("mouse_invert_y", false, "Inverts vertical mouse look", "Controls/Mouse", VariableFlags::Saved);
-		actions.SetMouseSensitivity(LookSensitivityScale(sensitivity.GetFloat()));
-		actions.SetLookSetting(sensitivity.GetFloat());
-		actions.SetInvertMouseY(invert.GetBool());
-		sensitivity.Subscribe(
-			[this](const Swim::Commands::ConsoleVariable& variable)
-			{
-				actionMap->SetMouseSensitivity(LookSensitivityScale(variable.GetFloat()));
-				actionMap->SetLookSetting(variable.GetFloat());
-			});
-		invert.Subscribe(
-			[this](const Swim::Commands::ConsoleVariable& variable)
-			{
-				actionMap->SetInvertMouseY(variable.GetBool());
-			});
-
-		Swim::Input::ActionDesc fullscreen;
-		fullscreen.Name = "toggle_fullscreen";
-		fullscreen.Description = "Switches between windowed and fullscreen";
-		fullscreen.Category = "Controls/Window";
-		fullscreen.Command = "fullscreen_toggle";
-		fullscreen.DefaultBindings.push_back({});
-		fullscreen.DefaultBindings.back().Type = Swim::Input::InputBindingType::ScanCode;
-		fullscreen.DefaultBindings.back().PhysicalKey = Swim::Platform::ScanCode::F11;
-		actions.RegisterAction(std::move(fullscreen));
-
-		commands.Register({ "bind", "Shows or replaces the inputs of an action", "Controls", "<action> [none | <input>...]" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				actionMap->ExecuteBind(arguments);
-			});
-		commands.Register({ "bind_add", "Adds an input to an action", "Controls", "<action> <input>" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				Swim::Input::InputBinding binding;
-				const auto action = arguments.size() == 2 ? actionMap->FindAction(arguments[0]) : Swim::Input::InvalidAction;
-
-				if (action == Swim::Input::InvalidAction || !Swim::Input::ParseBinding(arguments[1], binding))
-				{
-					throw std::invalid_argument("usage: bind_add <action> <input>");
-				}
-
-				actionMap->AddBinding(action, binding);
-			});
-		commands.Register({ "unbind", "Removes one input (or all inputs) from an action", "Controls", "<action> [input]" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				const auto action = arguments.empty() ? Swim::Input::InvalidAction : actionMap->FindAction(arguments[0]);
-
-				if (action == Swim::Input::InvalidAction)
-				{
-					throw std::invalid_argument("usage: unbind <action> [input]");
-				}
-
-				Swim::Input::InputBinding binding;
-
-				if (arguments.size() < 2)
-				{
-					actionMap->SetBindings(action, {});
-				}
-				else if (Swim::Input::ParseBinding(arguments[1], binding))
-				{
-					actionMap->RemoveBinding(action, binding);
-				}
-				else
-				{
-					throw std::invalid_argument("unknown input " + arguments[1]);
-				}
-			});
-		commands.Register({ "bind_list", "Lists actions and their inputs", "Controls", "[filter]" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				for (Swim::Input::ActionId id = 0; id < actionMap->GetActionCount(); ++id)
-				{
-					const auto& desc = actionMap->GetDesc(id);
-
-					if (!arguments.empty() && desc.Name.find(arguments[0]) == std::string::npos &&
-						desc.Category.find(arguments[0]) == std::string::npos)
-					{
-						continue;
-					}
-
-					std::string line = desc.Name + " =";
-
-					for (const auto& binding : actionMap->GetBindings(id))
-					{
-						line += " " + Swim::Input::FormatBinding(binding);
-					}
-
-					std::cout << line << (actionMap->HasDefaultBindings(id) ? "" : " *") << "  [" << desc.Category << "] " << desc.Description
-							  << '\n';
-				}
-			});
-		commands.Register({ "bind_reset", "Restores the default inputs of an action (or all)", "Controls", "<action|all>" },
-			[this](const std::vector<std::string>& arguments)
-			{
-				if (arguments.empty())
-				{
-					throw std::invalid_argument("usage: bind_reset <action|all>");
-				}
-
-				if (arguments[0] == "all")
-				{
-					actionMap->ResetAllBindings();
-					return;
-				}
-
-				const auto action = actionMap->FindAction(arguments[0]);
-
-				if (action == Swim::Input::InvalidAction)
-				{
-					throw std::invalid_argument("no input action " + arguments[0]);
-				}
-
-				actionMap->ResetBindings(action);
-			});
 	}
 
 	std::filesystem::path SwimEngine::GetUserConfigPath() const
@@ -1583,7 +962,8 @@ namespace Engine
 		if (haveLastTick)
 		{
 			// The whole previous frame, start to start (what the frame rate is).
-			profiler.Add("frame", "Frame (wall, start to start)", std::chrono::duration<double, std::milli>(tickStart - lastTickStart).count());
+			profiler.Add(
+				"frame", "Frame (wall, start to start)", std::chrono::duration<double, std::milli>(tickStart - lastTickStart).count());
 		}
 
 		lastTickStart = tickStart;
@@ -1601,27 +981,7 @@ namespace Engine
 			}
 		}
 
-		// Deferred console lines (the `after` command) whose frame has come, in order.
-		for (std::size_t i = 0; i < deferredCommands.size();)
-		{
-			if (deferredCommands[i].first > totalFrames)
-			{
-				++i;
-				continue;
-			}
-
-			const std::string line = deferredCommands[i].second;
-			deferredCommands.erase(deferredCommands.begin() + static_cast<std::ptrdiff_t>(i));
-
-			try
-			{
-				commandRegistry->ParseAndDispatch(line);
-			}
-			catch (const std::exception& error)
-			{
-				std::cerr << "[Console] after: " << error.what() << '\n';
-			}
-		}
+		RunDeferredCommands();
 
 		if (!benchSteps.empty() && !profiler.IsCapturing())
 		{
@@ -1640,55 +1000,16 @@ namespace Engine
 			framePacing->BeginFrame();
 		}
 
-		std::optional<FrameProfiler::Scope> eventsScope;
-		eventsScope.emplace(profiler, "Platform events");
-		platformSystem->PumpEvents(
-			[this](const Swim::Platform::WindowEvent& event)
-			{
-				HandleWindowEvent(event);
-			},
-			[this](const Swim::Platform::InputEvent& event)
-			{
-				if (!inputSystem || !engineWindow || !config.PlatformInput || (event.Window != 0 && event.Window != engineWindow->GetId()))
-				{
-					return;
-				}
-
-				inputSystem->ProcessInputEvent(event);
-			});
-		eventsScope.reset();
+		PumpPlatformEvents();
 
 		if (!running)
 		{
 			return false;
 		}
 
-		// Wall-clock delta (or a fixed one for deterministic runs).
-		const auto now = std::chrono::steady_clock::now();
-		double realDelta = config.FixedFrameDelta > 0.0 ? config.FixedFrameDelta : 0.0;
+		const double realDelta = MeasureRealDelta();
 
-		if (config.FixedFrameDelta <= 0.0)
-		{
-			realDelta = havePreviousTime ? std::chrono::duration<double>(now - previousTime).count() : 1.0 / 60.0;
-		}
-
-		previousTime = now;
-		havePreviousTime = true;
-
-		inputSystem->AdvanceFrame();
-		actionMap->SetContextActive(actionMap->GetTextContext(), textInputActive || (console && console->IsOpen()));
-		actionMap->Update(*inputSystem,
-			[this](std::string_view line)
-			{
-				try
-				{
-					commandRegistry->ParseAndDispatch(line);
-				}
-				catch (const std::exception& error)
-				{
-					std::cerr << "[Input] " << line << ": " << error.what() << '\n';
-				}
-			});
+		DispatchInputActions();
 		frameArena.BeginFrame(totalFrames + 1);
 		currentFrame = clock.Advance(realDelta);
 
@@ -1717,21 +1038,7 @@ namespace Engine
 			PrintRenderStats();
 		}
 
-		fpsTimeAccumulator += realDelta;
-		++fpsFrameCounter;
-
-		if (fpsTimeAccumulator >= 1.0)
-		{
-			fps = static_cast<int>(static_cast<double>(fpsFrameCounter) / fpsTimeAccumulator);
-
-			if (ownsWindow && engineWindow)
-			{
-				engineWindow->SetTitle(GetWindowTitle() + " | " + std::to_string(fps) + " FPS");
-			}
-
-			fpsTimeAccumulator = 0.0;
-			fpsFrameCounter = 0;
-		}
+		UpdateFpsCounter(realDelta);
 
 		if (config.MaxFrames != 0 && totalFrames >= config.MaxFrames)
 		{
@@ -1760,6 +1067,105 @@ namespace Engine
 			{
 				std::cerr << "[Config] Could not write " << path.string() << '\n';
 			}
+		}
+	}
+
+	void SwimEngine::RunDeferredCommands()
+	{
+		// Deferred console lines (the `after` command) whose frame has come, in order.
+		for (std::size_t i = 0; i < deferredCommands.size();)
+		{
+			if (deferredCommands[i].first > totalFrames)
+			{
+				++i;
+				continue;
+			}
+
+			const std::string line = deferredCommands[i].second;
+			deferredCommands.erase(deferredCommands.begin() + static_cast<std::ptrdiff_t>(i));
+
+			try
+			{
+				commandRegistry->ParseAndDispatch(line);
+			}
+			catch (const std::exception& error)
+			{
+				std::cerr << "[Console] after: " << error.what() << '\n';
+			}
+		}
+	}
+
+	void SwimEngine::PumpPlatformEvents()
+	{
+		std::optional<FrameProfiler::Scope> eventsScope;
+		eventsScope.emplace(profiler, "Platform events");
+		platformSystem->PumpEvents(
+			[this](const Swim::Platform::WindowEvent& event)
+			{
+				HandleWindowEvent(event);
+			},
+			[this](const Swim::Platform::InputEvent& event)
+			{
+				if (!inputSystem || !engineWindow || !config.PlatformInput || (event.Window != 0 && event.Window != engineWindow->GetId()))
+				{
+					return;
+				}
+
+				inputSystem->ProcessInputEvent(event);
+			});
+		eventsScope.reset();
+	}
+
+	double SwimEngine::MeasureRealDelta()
+	{
+		// Wall-clock delta (or a fixed one for deterministic runs).
+		const auto now = std::chrono::steady_clock::now();
+		double realDelta = config.FixedFrameDelta > 0.0 ? config.FixedFrameDelta : 0.0;
+
+		if (config.FixedFrameDelta <= 0.0)
+		{
+			realDelta = havePreviousTime ? std::chrono::duration<double>(now - previousTime).count() : 1.0 / 60.0;
+		}
+
+		previousTime = now;
+		havePreviousTime = true;
+		return realDelta;
+	}
+
+	void SwimEngine::DispatchInputActions()
+	{
+		inputSystem->AdvanceFrame();
+		actionMap->SetContextActive(actionMap->GetTextContext(), textInputActive || (console && console->IsOpen()));
+		actionMap->Update(*inputSystem,
+			[this](std::string_view line)
+			{
+				try
+				{
+					commandRegistry->ParseAndDispatch(line);
+				}
+				catch (const std::exception& error)
+				{
+					std::cerr << "[Input] " << line << ": " << error.what() << '\n';
+				}
+			});
+	}
+
+	void SwimEngine::UpdateFpsCounter(double realDelta)
+	{
+		fpsTimeAccumulator += realDelta;
+		++fpsFrameCounter;
+
+		if (fpsTimeAccumulator >= 1.0)
+		{
+			fps = static_cast<int>(static_cast<double>(fpsFrameCounter) / fpsTimeAccumulator);
+
+			if (ownsWindow && engineWindow)
+			{
+				engineWindow->SetTitle(GetWindowTitle() + " | " + std::to_string(fps) + " FPS");
+			}
+
+			fpsTimeAccumulator = 0.0;
+			fpsFrameCounter = 0;
 		}
 	}
 
@@ -1792,40 +1198,7 @@ namespace Engine
 
 		zone.emplace(profiler, "UI sync and input");
 
-		// Camera aspect and the UI view (canvases route this frame's input before gameplay
-		// reads it, so behaviours can see whether the UI took the pointer).
-		auto& camera = cameraSystem->GetCamera();
-
-		if (surfaceWidth && surfaceHeight)
-		{
-			camera.SetAspect(static_cast<float>(surfaceWidth) / static_cast<float>(surfaceHeight));
-		}
-
-		UiRuntime::ViewDesc uiView;
-		uiView.Camera.View = camera.GetViewRowMajor();
-		uiView.Camera.Projection = camera.GetProjectionRowMajor();
-		uiView.Camera.ViewportWidth = static_cast<float>(surfaceWidth);
-		uiView.Camera.ViewportHeight = static_cast<float>(surfaceHeight);
-		uiView.DpiScale = engineWindow ? engineWindow->GetDpiScale() : 1.0f;
-
-		if (uiRuntime)
-		{
-			uiRuntime->Sync(scene, uiView);
-
-			if (consoleOverlay)
-			{
-				consoleOverlay->BeforeInput(engineWindow ? inputSystem.get() : nullptr);
-			}
-
-			uiRuntime->ApplyInput(engineWindow ? inputSystem.get() : nullptr, static_cast<float>(realDelta));
-
-			if (consoleOverlay)
-			{
-				consoleOverlay->AfterInput();
-			}
-
-			UpdateTextInput();
-		}
+		SyncUi(scene, realDelta);
 
 		zone.reset();
 		// Fixed steps: behaviours, then one physics step each (collision callbacks follow).
@@ -1846,6 +1219,8 @@ namespace Engine
 		sceneSystem->Update(currentFrame.ScaledDelta);
 		zone.emplace(profiler, "Camera components");
 		ApplyCameraComponents();
+
+		auto& camera = cameraSystem->GetCamera();
 
 		if (audioSystem)
 		{
@@ -1882,6 +1257,52 @@ namespace Engine
 		zone.emplace(profiler, "Render bridge (extraction, lights, probes)");
 		renderBridge->Update();
 
+		zone.reset();
+		RenderFrame(realDelta);
+	}
+
+	void SwimEngine::SyncUi(Scene* scene, double realDelta)
+	{
+		// Camera aspect and the UI view (canvases route this frame's input before gameplay
+		// reads it, so behaviours can see whether the UI took the pointer).
+		auto& camera = cameraSystem->GetCamera();
+
+		if (surfaceWidth && surfaceHeight)
+		{
+			camera.SetAspect(static_cast<float>(surfaceWidth) / static_cast<float>(surfaceHeight));
+		}
+
+		UiRuntime::ViewDesc uiView;
+		uiView.Camera.View = camera.GetViewRowMajor();
+		uiView.Camera.Projection = camera.GetProjectionRowMajor();
+		uiView.Camera.ViewportWidth = static_cast<float>(surfaceWidth);
+		uiView.Camera.ViewportHeight = static_cast<float>(surfaceHeight);
+		uiView.DpiScale = engineWindow ? engineWindow->GetDpiScale() : 1.0f;
+
+		if (uiRuntime)
+		{
+			uiRuntime->Sync(scene, uiView);
+
+			if (consoleOverlay)
+			{
+				consoleOverlay->BeforeInput(engineWindow ? inputSystem.get() : nullptr);
+			}
+
+			uiRuntime->ApplyInput(engineWindow ? inputSystem.get() : nullptr, static_cast<float>(realDelta));
+
+			if (consoleOverlay)
+			{
+				consoleOverlay->AfterInput();
+			}
+
+			UpdateTextInput();
+		}
+	}
+
+	void SwimEngine::RenderFrame(double realDelta)
+	{
+		std::optional<FrameProfiler::Scope> zone;
+		auto& camera = cameraSystem->GetCamera();
 		zone.emplace(profiler, "UI layout and paint");
 		std::span<const UiDrawItem> ui;
 
@@ -1968,6 +1389,11 @@ namespace Engine
 			{
 				lastFrameError = error.what();
 				std::cerr << "[Render] Frame failed (skipped): " << lastFrameError << '\n';
+
+				if (dynamic_cast<const Swim::Rhi::DeviceLostError*>(&error) && renderDevice)
+				{
+					LogDeviceLoss(renderDevice->GetDevice());
+				}
 			}
 
 			if (failedFrames >= MaxFailedFrames)
@@ -2088,6 +1514,38 @@ namespace Engine
 		}
 	}
 
+	// Exit's renderer teardown, after the scenes: the bridge, the UI, the renderer, then the
+	// device (its pipeline cache saved first).
+	void SwimEngine::ReleaseRenderer()
+	{
+		renderBridge.reset();
+		renderToggles.reset();
+		consoleOverlay.reset();
+		console.reset();
+		uiRuntime.reset();
+		renderServices = {};
+		if (framePacing)
+		{
+			framePacing->SetDevice(nullptr);
+		}
+
+		if (renderQuality)
+		{
+			renderQuality->SetSettings(nullptr);
+		}
+
+		shaderHotReload.reset();
+		frameRenderer.reset();
+
+		if (renderDevice && platformSystem)
+		{
+			SavePipelineCacheFile(renderDevice->GetDevice(),
+				platformSystem->GetFileSystem().GetCacheRoot() / PipelineCacheFileName(renderDevice->GetDevice()));
+		}
+
+		renderDevice.reset();
+	}
+
 	int SwimEngine::Exit()
 	{
 		if (!started)
@@ -2140,25 +1598,7 @@ namespace Engine
 			record("SceneSystem", sceneSystem->Exit());
 		}
 
-		renderBridge.reset();
-		renderToggles.reset();
-		consoleOverlay.reset();
-		console.reset();
-		uiRuntime.reset();
-		renderServices = {};
-		if (framePacing)
-		{
-			framePacing->SetDevice(nullptr);
-		}
-
-		if (renderQuality)
-		{
-			renderQuality->SetSettings(nullptr);
-		}
-
-		shaderHotReload.reset();
-		frameRenderer.reset();
-		renderDevice.reset();
+		ReleaseRenderer();
 
 		if (assetSystem && assetSystem->IsRunning())
 		{

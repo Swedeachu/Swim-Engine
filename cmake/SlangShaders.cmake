@@ -139,6 +139,50 @@ function(swim_add_slang_program name)
 		COMMAND_EXPAND_LISTS
 	)
 
+	# The same program as DXIL for the Direct3D 12 backend: <name>.dxil (one container per
+	# entry point) and <name>.dxil.reflection.json (its registers, matched to the SPIR-V
+	# bindings by parameter name at load).
+	if(SWIM_SLANG_DXC_DIR AND SWIM_SLANG_PROGRAM_TARGET STREQUAL "spirv")
+		set(SWIM_SLANG_PROGRAM_DXIL "${SWIM_SLANG_PROGRAM_OUTPUT_DIRECTORY}/${SWIM_SLANG_PROGRAM_OUTPUT_NAME}.dxil")
+		set(SWIM_SLANG_PROGRAM_DXIL_REFLECTION "${SWIM_SLANG_PROGRAM_OUTPUT_DIRECTORY}/${SWIM_SLANG_PROGRAM_OUTPUT_NAME}.dxil.reflection.json")
+		set(SWIM_SLANG_PROGRAM_DXIL_DEPFILE "${SWIM_SLANG_PROGRAM_DEPFILE_DIRECTORY}/${name}.dxil.d")
+		set(SWIM_SLANG_PROGRAM_INCLUDE_TEXT "")
+		foreach(SWIM_INCLUDE_DIRECTORY IN LISTS SWIM_SLANG_PROGRAM_INCLUDE_DIRECTORIES)
+			if(NOT IS_ABSOLUTE "${SWIM_INCLUDE_DIRECTORY}")
+				set(SWIM_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${SWIM_INCLUDE_DIRECTORY}")
+			endif()
+			list(APPEND SWIM_SLANG_PROGRAM_INCLUDE_TEXT "${SWIM_INCLUDE_DIRECTORY}")
+		endforeach()
+		string(REPLACE ";" "|" SWIM_SLANG_PROGRAM_INCLUDE_TEXT "${SWIM_SLANG_PROGRAM_INCLUDE_TEXT}")
+		string(REPLACE ";" "|" SWIM_SLANG_PROGRAM_DEFINE_TEXT "${SWIM_SLANG_PROGRAM_DEFINES}")
+		add_custom_command(
+			OUTPUT
+				"${SWIM_SLANG_PROGRAM_DXIL}"
+				"${SWIM_SLANG_PROGRAM_DXIL_REFLECTION}"
+			COMMAND "${CMAKE_COMMAND}" -E make_directory "${SWIM_SLANG_PROGRAM_OUTPUT_DIRECTORY}"
+			COMMAND "${CMAKE_COMMAND}" -E make_directory "${SWIM_SLANG_PROGRAM_DEPFILE_DIRECTORY}"
+			COMMAND "${CMAKE_COMMAND}"
+				"-DSLANGC=$<TARGET_FILE:SwimSlangCompiler>"
+				"-DSOURCE=${SWIM_SLANG_PROGRAM_SOURCE}"
+				"-DOUTPUT=${SWIM_SLANG_PROGRAM_DXIL}"
+				"-DREFLECTION=${SWIM_SLANG_PROGRAM_DXIL_REFLECTION}"
+				"-DDEPFILE=${SWIM_SLANG_PROGRAM_DXIL_DEPFILE}"
+				"-DDXC_DIR=${SWIM_SLANG_DXC_DIR}"
+				"-DPROFILE=${SWIM_SLANG_DXIL_PROFILE}"
+				"-DENTRY=${SWIM_SLANG_PROGRAM_ENTRY_POINT}"
+				"-DINCLUDES=${SWIM_SLANG_PROGRAM_INCLUDE_TEXT}"
+				"-DDEFINES=${SWIM_SLANG_PROGRAM_DEFINE_TEXT}"
+				-P "${SWIM_ENGINE_SOURCE_DIR}/cmake/SlangDxil.cmake"
+			DEPENDS "${SWIM_SLANG_PROGRAM_SOURCE}" SwimSlangCompiler "${SWIM_ENGINE_SOURCE_DIR}/cmake/SlangDxil.cmake"
+			DEPFILE "${SWIM_SLANG_PROGRAM_DXIL_DEPFILE}"
+			COMMENT "Compiling Slang program ${name} -> dxil + reflection"
+			VERBATIM
+		)
+		set(${name}_DXIL "${SWIM_SLANG_PROGRAM_DXIL}" PARENT_SCOPE)
+		set(${name}_DXIL_REFLECTION "${SWIM_SLANG_PROGRAM_DXIL_REFLECTION}" PARENT_SCOPE)
+		set_property(GLOBAL APPEND PROPERTY SWIM_SLANG_DXIL_OUTPUTS "${SWIM_SLANG_PROGRAM_DXIL}" "${SWIM_SLANG_PROGRAM_DXIL_REFLECTION}")
+	endif()
+
 	if(SWIM_SLANG_PROGRAM_RUNTIME_NAME)
 		swim_register_runtime_shader("${SWIM_SLANG_PROGRAM_RUNTIME_NAME}" "${name}" "${SWIM_SLANG_PROGRAM_REQUIRED}")
 	endif()
@@ -250,16 +294,25 @@ function(swim_add_runtime_shader name)
 		if(DEFINED SWIM_RUNTIME_SHADER_DIR AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 			set(staged_spv "${SWIM_RUNTIME_SHADER_DIR}/${name}.spv")
 			set(staged_json "${SWIM_RUNTIME_SHADER_DIR}/${name}.reflection.json")
+			set(staged "${staged_spv}" "${staged_json}")
+			set(sources "${${program}_SPIRV}" "${${program}_REFLECTION}")
+			if(DEFINED ${program}_DXIL)
+				list(APPEND staged "${SWIM_RUNTIME_SHADER_DIR}/${name}.dxil" "${SWIM_RUNTIME_SHADER_DIR}/${name}.dxil.reflection.json")
+				list(APPEND sources "${${program}_DXIL}" "${${program}_DXIL_REFLECTION}")
+			endif()
+			set(copies "")
+			foreach(source destination IN ZIP_LISTS sources staged)
+				list(APPEND copies COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${source}" "${destination}")
+			endforeach()
 			add_custom_command(
-				OUTPUT "${staged_spv}" "${staged_json}"
+				OUTPUT ${staged}
 				COMMAND "${CMAKE_COMMAND}" -E make_directory "${SWIM_RUNTIME_SHADER_DIR}"
-				COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${program}_SPIRV}" "${staged_spv}"
-				COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${program}_REFLECTION}" "${staged_json}"
-				DEPENDS "${${program}_SPIRV}" "${${program}_REFLECTION}"
+				${copies}
+				DEPENDS ${sources}
 				COMMENT "Staging runtime shader ${name}"
 				VERBATIM
 			)
-			add_custom_target(${program}Stage DEPENDS "${staged_spv}" "${staged_json}")
+			add_custom_target(${program}Stage DEPENDS ${staged})
 			swim_set_solution_folder(${program}Stage "${SWIM_SOLUTION_FOLDER_TOOLS}")
 			add_dependencies(SwimRuntimeShaders ${program}Stage)
 		endif()
@@ -287,4 +340,9 @@ function(swim_add_runtime_shader name)
 	set(${program}_SPIRV "${${program}_SPIRV}" PARENT_SCOPE)
 	set(${program}_REFLECTION "${${program}_REFLECTION}" PARENT_SCOPE)
 	set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADER_FILES "${${program}_SPIRV}" "${${program}_REFLECTION}")
+	if(DEFINED ${program}_DXIL)
+		set(${program}_DXIL "${${program}_DXIL}" PARENT_SCOPE)
+		set(${program}_DXIL_REFLECTION "${${program}_DXIL_REFLECTION}" PARENT_SCOPE)
+		set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADER_FILES "${${program}_DXIL}" "${${program}_DXIL_REFLECTION}")
+	endif()
 endfunction()

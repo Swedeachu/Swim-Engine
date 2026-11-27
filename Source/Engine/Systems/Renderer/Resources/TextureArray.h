@@ -48,6 +48,26 @@ namespace Swim::Render
 		std::string DebugName = "Texture array";
 	};
 
+	// How the mips generated for a layer (those its data leaves out) filter alpha. Colour is
+	// averaged by alpha either way, so clear texels never bleed into what stays visible, and
+	// each layer is filtered on its own, clamped at its edges (nothing wraps or crosses layers).
+	enum class AlphaMipFilter : std::uint8_t
+	{
+		// The array's choice: coverage at TextureArrayDesc::AlphaCoverageCutoff when that is
+		// above 0, else the average.
+		Array,
+		// The box-filtered average: translucent layers (water, stained glass, ice).
+		Average,
+		// The average, scaled per mip so the share of texels passing the cutoff stays mip 0's
+		// (Castano, "Computing Alpha Mipmaps"): scattered cut-outs (leaves, grass, flowers)
+		// stay filled in with distance instead of thinning away.
+		Coverage,
+		// The largest alpha of each 2 x 2: thin opaque strokes (frames, bars, rails, wire) stay
+		// one solid texel wide at every mip, so at a distance they draw as unbroken one-pixel
+		// lines instead of breaking into dots (coverage alone cannot keep a line connected).
+		Maximum,
+	};
+
 	// One layer's pixels: Mips[0] is Width x Height, each next mip half the size (at least
 	// 1), tightly packed rows of RGBA8 texels or rows of 4 x 4 BC7 blocks. RGBA8 data may
 	// stop after any mip (the rest are generated) and is resized when its size differs from
@@ -58,6 +78,12 @@ namespace Swim::Render
 		std::uint32_t Width = 0;
 		std::uint32_t Height = 0;
 		std::vector<std::vector<std::byte>> Mips;
+		// RGBA8: how generated mips filter alpha.
+		AlphaMipFilter AlphaMips = AlphaMipFilter::Array;
+		// Coverage: the alpha-test cutoff (0: the array's AlphaCoverageCutoff), and the share of
+		// mip 0's coverage the generated mips keep (below 1 thins far cut-outs).
+		float AlphaCutoff = 0.0f;
+		float CoverageScale = 1.0f;
 	};
 
 	// Turns a file's bytes into layer data; empty (with error set) when it cannot.

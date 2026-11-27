@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/Temporal/TemporalAntiAliasing.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalReference.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_TEMPORAL_RESOLVE_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_SKY_SPIRV_PATH) &&                                               \
@@ -182,9 +183,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "TAA smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -338,11 +337,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TemporalAntiAliasingMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunTemporalSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunTemporalSmoke>("TemporalAntiAliasingMatchesTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

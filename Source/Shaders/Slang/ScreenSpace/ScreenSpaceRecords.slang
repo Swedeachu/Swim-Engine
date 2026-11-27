@@ -122,7 +122,40 @@ float3 ScreenSpaceViewPosition(ScreenSpaceView view, float px, float py, float d
 	return clip.xyz * inverseW;
 }
 
+// The view-space distance (-z) of ScreenSpaceLoadViewPosition, from the two rows of the
+// inverse projection it needs (the same arithmetic, so the same value); 0 when invalid.
+float ScreenSpaceLoadViewDistance(ScreenSpaceView view, Texture2D<float> depth, int x, int y)
+{
+	const float d = depth.Load(int3(x, y, 0));
+	if (!(d > 0.0))
+	{
+		return 0.0;
+	}
+	const float4 ndc = float4(2.0 * (float(x) + 0.5) / float(view.Width) - 1.0 - view.Jitter.x,
+		1.0 - 2.0 * (float(y) + 0.5) / float(view.Height) - view.Jitter.y, d, 1.0);
+	const float w = dot(view.InverseProjection[3], ndc);
+	if (!(abs(w) > 1.0e-20))
+	{
+		return 0.0;
+	}
+	return -(dot(view.InverseProjection[2], ndc) * (1.0 / w));
+}
+
 float3 ScreenSpaceLoadViewPosition(ScreenSpaceView view, Texture2D<float> depth, int x, int y, out bool valid)
 {
 	return ScreenSpaceViewPosition(view, float(x) + 0.5, float(y) + 0.5, depth.Load(int3(x, y, 0)), valid);
+}
+
+// Surfaces at or above this reverse-Z depth are first-person overlays (ForwardOverlayDepth).
+static const float ScreenSpaceOverlayDepth = 0.99;
+
+// AO linear depth (AoHalf bit 1, ScreenSpaceLinearDepth): per pixel the view distance,
+// negative for overlay surfaces, 0 for the sky. The view position at distance d along the
+// ray through (px, py), which runs through the eye and the near-plane point.
+float3 ScreenSpaceLinearViewPosition(ScreenSpaceView view, float px, float py, float d)
+{
+	const float4 ndc = float4(2.0 * px / float(view.Width) - 1.0 - view.Jitter.x, 1.0 - 2.0 * py / float(view.Height) - view.Jitter.y, 1.0, 1.0);
+	const float3 near = float3(dot(view.InverseProjection[0], ndc), dot(view.InverseProjection[1], ndc), dot(view.InverseProjection[2], ndc)) /
+		dot(view.InverseProjection[3], ndc);
+	return near * (d / -near.z);
 }

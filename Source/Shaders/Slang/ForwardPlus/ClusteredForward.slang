@@ -10,6 +10,8 @@
 // lights, each times its shadow factor (Shadows/ShadowRecords.slang) + ambient +
 // optional IBL + emission. Mirrors ForwardPlus::Shade; bindings and lighting come from
 // ForwardFrame.slang (ForwardPlusDrawBindings).
+#include "Resources/DrawIndex.slang"
+
 #ifndef FORWARD_TRANSPARENT
 #define FORWARD_TRANSPARENT 0
 #endif
@@ -31,6 +33,12 @@
 // every visible closed surface (ForwardPlusTargets::BackDepth).
 #ifndef FORWARD_BACK_DEPTH
 #define FORWARD_BACK_DEPTH 0
+#endif
+// SwimForwardDepthCoverage (FORWARD_DEPTH_ONLY=1, FORWARD_DEPTH_COVERAGE=1): the depth prepass
+// of multisampled frames. Alpha-masked texels write their coverage (ForwardAlphaCoverage) to
+// colour target 0's alpha for the pipeline's alpha to coverage, with no colour target bound.
+#ifndef FORWARD_DEPTH_COVERAGE
+#define FORWARD_DEPTH_COVERAGE 0
 #endif
 // SwimForwardOpaqueDeferred (FORWARD_PREPASSED=1, FORWARD_DEFERRED_LOCAL=1): the prepassed
 // opaque pass without the clustered local lights, writing the surface's base colour and
@@ -60,8 +68,10 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint drawSlotInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint drawSlot = DrawInstanceIndex(drawSlotInput);
 	const GpuDrawRecord record = DrawRecords[drawSlot];
 	const GpuInstanceRecord instance = Instances[record.InstanceRow];
 	// Loops copy the transform and vertex once each: GPU-assisted validation instruments
@@ -141,9 +151,18 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	return output;
 }
 
+// Alpha to coverage: the share of a pixel's samples an alpha-masked texel covers, from the
+// alpha's distance to the cutoff over its change across one pixel (width = fwidth(alpha)).
+// The edge is as sharp as a cutoff test but resolves to a smooth line.
+float ForwardAlphaCoverage(float alpha, float cutoff, float width)
+{
+	return saturate((alpha - cutoff) / max(width, 1.0e-4) + 0.5);
+}
+
 struct ShadedPixel
 {
 	float4 Color;	 // Linear radiance, straight alpha.
+	float Coverage;	 // ForwardViewFlagAlphaToCoverage: the alpha-masked texel's coverage; 1 otherwise.
 	float3 Indirect; // Ambient + IBL (ForwardPlus::IndirectRadiance), already in Color.
 	float3 Reflectance; // Split-sum specular reflectance (ForwardPlus::SpecularReflectance).
 	float3 Specular;	// Specular IBL (ForwardPlus::SpecularRadiance), part of Indirect.
@@ -159,7 +178,7 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 {
 	const ForwardView view = Views[0];
 	const ClusterGrid grid = Grid[0];
-	const StandardMaterialParameters material = Materials[input.Material];
+	const StandardMaterialParameters material = ForwardMaterial(input.Material);
 	// Derivatives before any discard (uniform control flow): the glint's texture layers.
 	const float2 uvDx = ddx(input.Uv);
 	const float2 uvDy = ddy(input.Uv);
@@ -187,6 +206,13 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const float3 tangent = normalize(input.Tangent.xyz - normal * dot(normal, input.Tangent.xyz) + float3(1.0e-20, 0.0, 0.0));
 	const float3 bitangent = cross(normal, tangent) * (input.Tangent.w < 0.0 ? -1.0 : 1.0);
 	StandardPbrSurface surface = StandardPbrResolve(material, texels, normal, tangent, bitangent, frontFacing);
+	const float alphaWidth = fwidth(surface.Alpha); // Before any discard below.
+	float coverage = 1.0;
+	if ((material.Flags & StandardMaterialFlagAlphaMask) != 0 && (view.Flags & ForwardViewFlagAlphaToCoverage) != 0)
+	{
+		coverage = ForwardAlphaCoverage(surface.Alpha, material.AlphaCutoff, alphaWidth);
+		surface.Discard = coverage <= 0.0;
+	}
 	if (surface.Discard)
 	{
 		discard;
@@ -205,6 +231,7 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	pixel.Reflectance = lit.Reflectance;
 	pixel.Indirect = lit.Indirect;
 	pixel.Color = float4(lit.Radiance, surface.Alpha);
+	pixel.Coverage = coverage;
 	pixel.Normal = surface.Normal;
 	pixel.Roughness = surface.PerceptualRoughness;
 	pixel.BaseColor = surface.BaseColor;
@@ -259,9 +286,16 @@ struct OpaqueOutput
 #if FORWARD_DEPTH_ONLY
 // Depth prepass: coverage only.
 [shader("fragment")]
+#if FORWARD_DEPTH_COVERAGE
+float4 fragmentMain(VertexOutput input, bool rasterFrontFacing : SV_IsFrontFace) : SV_Target0
+#else
 void fragmentMain(VertexOutput input, bool rasterFrontFacing : SV_IsFrontFace)
+#endif
 {
-	const StandardMaterialParameters material = Materials[input.Material];
+#if FORWARD_DEPTH_COVERAGE
+	float coverage = 1.0;
+#endif
+	const StandardMaterialParameters material = ForwardMaterial(input.Material);
 	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
 #if FORWARD_BACK_DEPTH
 	if (frontFacing)
@@ -279,11 +313,19 @@ void fragmentMain(VertexOutput input, bool rasterFrontFacing : SV_IsFrontFace)
 		const SamplerState materialSampler = Samplers[NonUniformResourceIndex(material.MaterialSampler)];
 		const float alpha =
 			material.BaseColorFactor.a * Textures[NonUniformResourceIndex(material.BaseColorTexture)].Sample(materialSampler, input.Uv).a;
+#if FORWARD_DEPTH_COVERAGE
+		coverage = ForwardAlphaCoverage(alpha, material.AlphaCutoff, fwidth(alpha));
+		if (coverage <= 0.0)
+#else
 		if (alpha < material.AlphaCutoff)
+#endif
 		{
 			discard;
 		}
 	}
+#if FORWARD_DEPTH_COVERAGE
+	return float4(0.0, 0.0, 0.0, coverage);
+#endif
 }
 #else
 #if FORWARD_PREPASSED
@@ -294,7 +336,8 @@ OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 {
 	const ShadedPixel pixel = ShadePixel(input, frontFacing);
 	OpaqueOutput output;
-	output.Color = pixel.UseDebug ? pixel.Debug : float4(pixel.Color.rgb, 1.0);
+	// Alpha is the coverage of alpha-to-coverage draws (1 for every other surface).
+	output.Color = pixel.UseDebug ? pixel.Debug : float4(pixel.Color.rgb, pixel.Coverage);
 	output.ObjectId = float(input.ObjectId + 1u);
 	const float2 now = input.CurrentClip.xy / input.CurrentClip.w;
 	const float2 before = input.PreviousClip.xy / input.PreviousClip.w;

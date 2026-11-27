@@ -23,7 +23,7 @@
 [[vk::binding(2, 0)]] StructuredBuffer<GpuDrawRecord> DrawRecords;
 [[vk::binding(3, 0)]] StructuredBuffer<float> Vertices;
 [[vk::binding(4, 0)]] StructuredBuffer<ForwardView> Views;
-[[vk::binding(5, 0)]] StructuredBuffer<StandardMaterialParameters> Materials;
+[[vk::binding(5, 0)]] StructuredBuffer<StandardMaterialRows> Materials; // Read through ForwardMaterial.
 [[vk::binding(6, 0)]] StructuredBuffer<GpuLightRecord> Lights;
 [[vk::binding(7, 0)]] StructuredBuffer<GpuLightHeader> LightHeader;
 [[vk::binding(8, 0)]] StructuredBuffer<ClusterGrid> Grid;
@@ -38,6 +38,16 @@
 [[vk::binding(17, 0)]] StructuredBuffer<GpuShadowView> ShadowViews;
 [[vk::binding(0, 1)]] SamplerState Samplers[];
 [[vk::binding(1, 1)]] Texture2D<float4> Textures[];
+
+StandardMaterialParameters ForwardMaterial(uint row)
+{
+	float4 rows[5];
+	for (uint i = 0; i < 5; ++i)
+	{
+		rows[i] = Materials[row].Rows[i];
+	}
+	return StandardMaterialFromRows(rows);
+}
 
 // ForwardPlus::LightShadow.
 float ForwardLightShadow(ForwardView view, GpuLightRecord light, float3 position, float3 normal, float3 toLight)

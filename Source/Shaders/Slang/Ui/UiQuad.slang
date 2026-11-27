@@ -7,6 +7,7 @@
 // before premultiplied blending. World canvases take coverage ramps and MSDF ranges from
 // screen-space derivatives. Bindings follow UiRenderBindings; Ui::ShadeQuad and Ui::Encode
 // are the CPU definition.
+#include "Resources/DrawIndex.slang"
 #include "Features/Glint.slang"
 #include "Ui/UiRecords.slang"
 
@@ -24,12 +25,13 @@ struct VertexOutput
 	nointerpolation uint Quad : TEXCOORD2;
 };
 
-// gl_VertexIndex / gl_InstanceIndex directly (SV_Vulkan*), without the DrawParameters
-// capability (absent on some devices, e.g. SwiftShader): draws start at vertex 0, and
-// gl_InstanceIndex includes the first instance, so it is the quad index of every blend run.
+// The instance index includes the first instance (DrawIndex.slang), so it is the quad index
+// of every blend run.
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint instanceIdInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint instanceId = DrawInstanceIndex(instanceIdInput);
 	const float4 rect = Quads[instanceId].Rect;
 	const float4 clip = Quads[instanceId].Clip;
 	const float4 uv = Quads[instanceId].Uv;

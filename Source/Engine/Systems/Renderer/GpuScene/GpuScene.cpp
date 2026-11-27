@@ -1,6 +1,7 @@
 #include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace Swim::Render
@@ -72,6 +73,8 @@ namespace Swim::Render
 		auto& transform = transforms.Edit(handle->Index);
 		std::copy(desc.Transform.Rows.begin(), desc.Transform.Rows.end(), transform.Current);
 		std::copy(desc.Transform.Rows.begin(), desc.Transform.Rows.end(), transform.Previous); // No motion yet.
+		TouchStatic(instance.Flags);
+		NoteChange(handle->Index);
 		return handle;
 	}
 
@@ -93,6 +96,8 @@ namespace Swim::Render
 		}
 
 		objects.Release(object, lastUse);
+		TouchStatic(instances.Get(object.Index).Flags);
+		NoteChange(object.Index);
 		instances.Edit(object.Index) = {}; // Dead row: Flags and Generation are zero.
 		return true;
 	}
@@ -118,6 +123,8 @@ namespace Swim::Render
 			return true;
 		}
 
+		TouchStatic(instances.Get(object.Index).Flags);
+		NoteChange(object.Index);
 		auto& row = transforms.Edit(object.Index);
 
 		if (record->TransformFrame != frame)
@@ -129,6 +136,7 @@ namespace Swim::Render
 		}
 
 		std::copy(transform.Rows.begin(), transform.Rows.end(), row.Current);
+		NoteChange(object.Index);
 		return true;
 	}
 
@@ -147,9 +155,12 @@ namespace Swim::Render
 			return true;
 		}
 
+		TouchStatic(current.Flags);
+		NoteChange(object.Index);
 		auto& row = EditInstance(object);
 		WriteMesh(row, mesh);
 		WriteBounds(row, localBounds);
+		NoteChange(object.Index);
 		return true;
 	}
 
@@ -162,7 +173,10 @@ namespace Swim::Render
 
 		if (!SameBounds(instances.Get(object.Index), localBounds))
 		{
+			TouchStatic(instances.Get(object.Index).Flags);
+			NoteChange(object.Index);
 			WriteBounds(EditInstance(object), localBounds);
+			NoteChange(object.Index);
 		}
 
 		return true;
@@ -177,6 +191,8 @@ namespace Swim::Render
 
 		if (instances.Get(object.Index).MaterialSet != materialSet)
 		{
+			TouchStatic(instances.Get(object.Index).Flags);
+			NoteChange(object.Index);
 			EditInstance(object).MaterialSet = materialSet;
 		}
 
@@ -195,7 +211,10 @@ namespace Swim::Render
 
 		if (updated != current)
 		{
+			TouchStatic(current | updated);
+			NoteChange(object.Index);
 			EditInstance(object).Flags = updated;
+			NoteChange(object.Index);
 		}
 
 		return true;
@@ -255,10 +274,60 @@ namespace Swim::Render
 
 		if (instances.Get(object.Index).LodBias != lodBias)
 		{
+			TouchStatic(instances.Get(object.Index).Flags);
 			EditInstance(object).LodBias = lodBias;
 		}
 
 		return true;
+	}
+
+	void GpuScene::NoteChange(std::uint32_t row)
+	{
+		constexpr std::size_t MaxChanges = 256;
+		constexpr auto casts = static_cast<std::uint32_t>(RenderObjectFlags::CastShadows);
+		constexpr auto fixed = static_cast<std::uint32_t>(RenderObjectFlags::Static);
+		const auto& instance = instances.Get(row);
+
+		if (allChanged || (instance.Flags & LiveBit) == 0 || (instance.Flags & casts) == 0 || (instance.Flags & fixed) != 0)
+		{
+			return;
+		}
+
+		if (dynamicChanges.size() == MaxChanges)
+		{
+			allChanged = true;
+			dynamicChanges.clear();
+			return;
+		}
+
+		// The local box through the 3 x 4 row-major affine: centre moved, extents by |M|.
+		const float* m = transforms.Get(row).Current;
+		GpuSceneBox box;
+
+		for (int r = 0; r < 3; ++r)
+		{
+			float centre = m[r * 4 + 3];
+			float extent = 0.0f;
+
+			for (int c = 0; c < 3; ++c)
+			{
+				centre += m[r * 4 + c] * instance.LocalCenter[c];
+				extent += std::abs(m[r * 4 + c]) * instance.LocalExtents[c];
+			}
+
+			box.Min[r] = centre - extent;
+			box.Max[r] = centre + extent;
+		}
+
+		dynamicChanges.push_back(box);
+	}
+
+	void GpuScene::TouchStatic(std::uint32_t flags)
+	{
+		if ((flags & static_cast<std::uint32_t>(RenderObjectFlags::Static)) != 0)
+		{
+			++staticGeneration;
+		}
 	}
 
 	const GpuInstanceRecord* GpuScene::GetInstance(RenderObjectHandle object) const
@@ -346,6 +415,21 @@ namespace Swim::Render
 			transforms.Commit();
 		}
 
+		// Deforming meshes change their shadow without any setter call.
+		for (std::uint32_t row = 0; row < rowCount; ++row)
+		{
+			const auto& instance = instances.Get(row);
+
+			if (instance.SkinIndex != GpuInstanceRecord::InvalidIndex || instance.PreviousVertexOffset != 0)
+			{
+				NoteChange(row);
+			}
+		}
+
+		importedChanges = std::move(dynamicChanges);
+		importedAllChanged = allChanged;
+		dynamicChanges.clear();
+		allChanged = false;
 		// The frame ends here: objects moved this frame settle during the next import.
 		settling = std::move(moved);
 		moved.clear();

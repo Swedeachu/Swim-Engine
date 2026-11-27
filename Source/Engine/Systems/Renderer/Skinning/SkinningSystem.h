@@ -183,6 +183,40 @@ namespace Swim::Render
 			bool RecordedSettle = false;
 		};
 
+		// Record's working set: the instances to skin, and their packed dispatch rows.
+		struct SkinCandidate
+		{
+			SkinInstanceHandle Handle;
+			Instance* Data = nullptr;
+			const Mesh* Source = nullptr;
+			std::uint32_t Page = 0;
+			std::uint32_t OutputVertex = 0;
+			bool Settle = false;
+		};
+
+		// One output page's instances: rows [FirstRow, FirstRow + Rows) of the dispatch buffer.
+		struct PageGroup
+		{
+			std::uint32_t Page = 0;
+			std::uint32_t FirstRow = 0;
+			std::uint32_t Rows = 0;
+			std::uint32_t MaxVertices = 0;
+		};
+
+		struct SkinBatch
+		{
+			std::vector<GpuSkinDispatch> Rows;
+			std::vector<float> Palettes;
+			std::vector<float> Weights;
+			std::vector<PageGroup> Groups;
+		};
+
+		std::vector<SkinCandidate> CollectCandidates(const GeometryGraphResources& geometry, SkinningGraphResources& resources);
+		void RecordUploads(RenderGraph& graph, SkinningGraphResources& resources, const std::vector<SkinnedMeshHandle>& uploads);
+		SkinBatch PackCandidates(const std::vector<SkinCandidate>& candidates, SkinningGraphResources& resources);
+		void RecordSkinPass(
+			RenderGraph& graph, const GeometryGraphResources& geometry, const SkinBatch& batch, SkinningGraphResources& resources) const;
+
 		using MeshRegistry = GpuResourceRegistry<SkinnedMeshTag, Mesh>;
 		using InstanceRegistry = GpuResourceRegistry<GpuSkinTag, Instance>;
 

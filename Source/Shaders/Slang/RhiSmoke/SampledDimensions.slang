@@ -18,7 +18,7 @@
 void computeMain(uint3 id : SV_DispatchThreadID,
 	[[vk::binding(2, 0)]] uniform Texture2DArray<uint> Planes)
 {
-#if SWIM_TEST_CUBE_ARRAY
+#if SWIM_TEST_CUBE_ARRAY && !defined(SWIM_TARGET_DXIL)
 	// Slang 2026.16.1 omits this capability for TextureCubeArray. Declare it
 	// explicitly; the smoke selects this variant only with imageCubeArray enabled.
 	spirv_asm

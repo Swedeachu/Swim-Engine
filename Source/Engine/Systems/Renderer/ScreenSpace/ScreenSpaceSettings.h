@@ -29,6 +29,9 @@ namespace Swim::Render
 		// Trace one pixel of every 2 x 2 block (rotating each frame, like the half-resolution
 		// reflections); the blur resamples the traced texels on each pixel's own surface.
 		bool HalfResolution = false;
+		// Read a half-precision view distance, built once, instead of the depth (when the
+		// renderer has ScreenSpaceEffectsDesc::LinearDepth).
+		bool LinearDepth = true;
 	};
 
 	// Analytic exponential height fog with a sun in-scattering lobe (item 76).
@@ -104,6 +107,9 @@ namespace Swim::Render
 		// composite: half the rays, and every pixel traced every second frame (a 2 x 2 rotation
 		// left each pixel up to three frames old: reflections stuttered behind moving objects).
 		bool HalfResolution = false;
+		// The checkerboard resolve loads the traced texels around each 8 x 8 tile once into
+		// group-shared memory instead of per tap (same result; off: measured slightly slower).
+		bool HalfTapCache = false;
 		// Blend the reflection term (screen space over probes over the environment) with last
 		// frame's at the reprojected position (FrameRenderer keeps the history; needs motion
 		// vectors): settles flicker from the trace pattern, jitter and probe refreshes.

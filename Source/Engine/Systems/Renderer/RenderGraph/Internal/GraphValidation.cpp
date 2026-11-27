@@ -22,10 +22,101 @@ namespace Swim::Render::Internal
 		return graph.Resources[index];
 	}
 
-	void ValidateState(const GraphResource& r, Rhi::ResourceState state, bool allowUndefined)
+	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
+		struct BufferStateUsage
+		{
+			S State;
+			Rhi::BufferUsage Usage;
+		};
+
+		// Each buffer state flag and the usage it needs.
+		const BufferStateUsage BufferStates[] = {
+			{ S::Common, Rhi::BufferUsage::None },
+			{ S::CopySource, Rhi::BufferUsage::TransferSource },
+			{ S::CopyDestination, Rhi::BufferUsage::TransferDestination },
+			{ S::VertexBuffer, Rhi::BufferUsage::Vertex },
+			{ S::IndexBuffer, Rhi::BufferUsage::Index },
+			{ S::UniformBuffer, Rhi::BufferUsage::Uniform },
+			{ S::ShaderRead, Rhi::BufferUsage::Storage },
+			{ S::ShaderWrite, Rhi::BufferUsage::Storage },
+			{ S::IndirectArgument, Rhi::BufferUsage::Indirect },
+			{ S::HostRead, Rhi::BufferUsage::None },
+			{ S::HostWrite, Rhi::BufferUsage::None },
+		};
+
+		struct TextureStateUsage
+		{
+			S State;
+			Rhi::TextureUsage Usage;
+		};
+
+		// The texture states a graph accepts (an exact match) and the usage each needs.
+		const TextureStateUsage TextureStates[] = {
+			{ S::Common, Rhi::TextureUsage::None },
+			{ S::CopySource, Rhi::TextureUsage::TransferSource },
+			{ S::CopyDestination, Rhi::TextureUsage::TransferDestination },
+			{ S::ShaderRead, Rhi::TextureUsage::Sampled },
+			{ S::ShaderWrite, Rhi::TextureUsage::Storage },
+			{ S::ShaderRead | S::ShaderWrite, Rhi::TextureUsage::Storage },
+			{ S::ColorAttachment, Rhi::TextureUsage::ColorAttachment },
+			{ S::DepthStencilRead, Rhi::TextureUsage::DepthStencilAttachment },
+			{ S::DepthStencilWrite, Rhi::TextureUsage::DepthStencilAttachment },
+			{ S::DepthStencilRead | S::DepthStencilWrite, Rhi::TextureUsage::DepthStencilAttachment },
+			{ S::DepthStencilRead | S::ShaderRead, Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled },
+		};
+
+		void ValidateBufferState(const GraphResource& r, S state)
+		{
+			auto remaining = static_cast<std::uint32_t>(state);
+
+			for (const auto& entry : BufferStates)
+			{
+				if (!Rhi::HasAny(state, entry.State))
+				{
+					continue;
+				}
+
+				if (Rhi::EnumAnd(r.Buffer.Usage, entry.Usage) != entry.Usage)
+				{
+					throw std::invalid_argument("RenderGraph buffer state requires matching usage: " + r.Name);
+				}
+
+				remaining &= ~static_cast<std::uint32_t>(entry.State);
+			}
+
+			if (remaining || (Rhi::HasAny(state, S::HostRead) && r.Buffer.Memory != Rhi::MemoryPreference::GpuToCpu) ||
+				(Rhi::HasAny(state, S::HostWrite) && r.Buffer.Memory != Rhi::MemoryPreference::CpuToGpu))
+			{
+				throw std::invalid_argument("RenderGraph unsupported buffer state or host access: " + r.Name);
+			}
+		}
+
+		Rhi::TextureUsage RequiredTextureUsage(const GraphResource& r, S state)
+		{
+			for (const auto& entry : TextureStates)
+			{
+				if (entry.State == state)
+				{
+					return entry.Usage;
+				}
+			}
+
+			if (state != S::Present || !r.Imported)
+			{
+				throw std::invalid_argument("RenderGraph unsupported texture state: " + r.Name);
+			}
+
+			return Rhi::TextureUsage::None;
+		}
+
+	} // namespace
+
+	void ValidateState(const GraphResource& r, Rhi::ResourceState state, bool allowUndefined)
+	{
 		if (state == S::Undefined)
 		{
 			if (allowUndefined)
@@ -38,82 +129,11 @@ namespace Swim::Render::Internal
 
 		if (r.Kind == GraphKind::Buffer)
 		{
-			using U = Rhi::BufferUsage;
-			auto remaining = static_cast<std::uint32_t>(state);
-			const auto check = [&](S flag, U usage)
-			{
-				if (!Rhi::HasAny(state, flag))
-				{
-					return;
-				}
-
-				if (Rhi::EnumAnd(r.Buffer.Usage, usage) != usage)
-				{
-					throw std::invalid_argument("RenderGraph buffer state requires matching usage: " + r.Name);
-				}
-
-				remaining &= ~static_cast<std::uint32_t>(flag);
-			};
-
-			check(S::Common, U::None);
-			check(S::CopySource, U::TransferSource);
-			check(S::CopyDestination, U::TransferDestination);
-			check(S::VertexBuffer, U::Vertex);
-			check(S::IndexBuffer, U::Index);
-			check(S::UniformBuffer, U::Uniform);
-			check(S::ShaderRead, U::Storage);
-			check(S::ShaderWrite, U::Storage);
-			check(S::IndirectArgument, U::Indirect);
-			check(S::HostRead, U::None);
-			check(S::HostWrite, U::None);
-
-			if (remaining || (Rhi::HasAny(state, S::HostRead) && r.Buffer.Memory != Rhi::MemoryPreference::GpuToCpu) ||
-				(Rhi::HasAny(state, S::HostWrite) && r.Buffer.Memory != Rhi::MemoryPreference::CpuToGpu))
-			{
-				throw std::invalid_argument("RenderGraph unsupported buffer state or host access: " + r.Name);
-			}
-
+			ValidateBufferState(r, state);
 			return;
 		}
 
-		using U = Rhi::TextureUsage;
-		U usage = U::None;
-
-		if (state == S::Common)
-		{
-		}
-		else if (state == S::CopySource)
-		{
-			usage = U::TransferSource;
-		}
-		else if (state == S::CopyDestination)
-		{
-			usage = U::TransferDestination;
-		}
-		else if (state == S::ShaderRead)
-		{
-			usage = U::Sampled;
-		}
-		else if (state == S::ShaderWrite || state == (S::ShaderRead | S::ShaderWrite))
-		{
-			usage = U::Storage;
-		}
-		else if (state == S::ColorAttachment)
-		{
-			usage = U::ColorAttachment;
-		}
-		else if (state == S::DepthStencilRead || state == S::DepthStencilWrite || state == (S::DepthStencilRead | S::DepthStencilWrite))
-		{
-			usage = U::DepthStencilAttachment;
-		}
-		else if (state == (S::DepthStencilRead | S::ShaderRead))
-		{
-			usage = U::DepthStencilAttachment | U::Sampled;
-		}
-		else if (state != S::Present || !r.Imported)
-		{
-			throw std::invalid_argument("RenderGraph unsupported texture state: " + r.Name);
-		}
+		const auto usage = RequiredTextureUsage(r, state);
 
 		if (Rhi::EnumAnd(r.Texture.Usage, usage) != usage ||
 			(Rhi::HasAny(state, S::ColorAttachment) && Rhi::IsDepthFormat(r.Texture.PixelFormat)) ||

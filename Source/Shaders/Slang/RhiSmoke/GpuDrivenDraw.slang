@@ -3,6 +3,7 @@
 // the GpuDrawRecord naming the GPU Scene row; vertices are pulled from the
 // GeometryHeap vertex page (float3 positions). The fragment writes ObjectId + 1
 // as RGB bytes so the test can map every pixel back to an object.
+#include "Resources/DrawIndex.slang"
 #include "GpuScene/GpuSceneRecords.slang"
 #include "GpuScene/VisibilityRecords.slang"
 
@@ -19,8 +20,10 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint drawSlotInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint drawSlot = DrawInstanceIndex(drawSlotInput);
 	const GpuDrawRecord record = DrawRecords[drawSlot];
 	const GpuInstanceRecord instance = Instances[record.InstanceRow];
 	const float3 local = float3(Positions[vertexId * 3], Positions[vertexId * 3 + 1], Positions[vertexId * 3 + 2]);

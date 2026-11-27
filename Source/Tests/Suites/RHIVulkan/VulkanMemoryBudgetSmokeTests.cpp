@@ -1,6 +1,7 @@
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #include <cstdio>
@@ -44,9 +45,7 @@ namespace
 		using namespace Swim;
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Memory budget smoke requires a working SDL desktop video driver");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Memory budget smoke requires the Swim Vulkan baseline and validation");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const bool driverSupported = device->GetAdapterInfo().Capabilities.MemoryBudget;
@@ -109,8 +108,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "MemoryBudgetAllocationAndRelease", SWIM_TEST_LOCATION,
-				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunMemoryBudgetSmoke); } });
+			Swim::Testing::AddSmoke<&RunMemoryBudgetSmoke>("MemoryBudgetAllocationAndRelease", SWIM_TEST_LOCATION);
 		}
 
 		return true;

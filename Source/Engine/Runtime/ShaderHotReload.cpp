@@ -3,6 +3,8 @@
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Thread.h"
 #include "Engine/Systems/Renderer/Runtime/FrameRenderer.h"
+#include "Tools/ShaderCompiler/ShaderNativeBindings.h"
+#include "Tools/ShaderCompiler/ShaderReflection.h"
 
 #include <algorithm>
 #include <atomic>
@@ -275,6 +277,113 @@ namespace Engine
 			return false;
 		}
 
+		static bool ReadBytes(const fs::path& path, std::string& bytes)
+		{
+			std::ifstream file(path, std::ios::binary);
+			bytes.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+			return static_cast<bool>(file) || file.eof();
+		}
+
+		static bool WriteBytes(const fs::path& path, std::string_view bytes)
+		{
+			std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+			return static_cast<bool>(file);
+		}
+
+		// The program as DXIL, as cmake/SlangDxil.cmake builds it: register reflection (and the
+		// size queries) from the HLSL target, then one DXIL container per entry point,
+		// concatenated. Writes <base>.dxil and <base>.dxil.reflection.json; returns the
+		// failure's log, or an empty string.
+		std::string CompileDxil(const Program& program, const fs::path& base) const
+		{
+			std::vector<std::string> common{ desc.Compiler.string(), program.Source.string(), "-lang", "slang", "-profile",
+				desc.DxilProfile, "-matrix-layout-column-major", "-preserve-params", "-DSWIM_TARGET_DXIL=1" };
+
+			for (const auto& include : program.Includes)
+			{
+				common.insert(common.end(), { "-I", include });
+			}
+
+			for (const auto& define : program.Defines)
+			{
+				common.push_back("-D" + define);
+			}
+
+			// Before shader model 6.8 the draw base comes from root constants.
+			int major = 0;
+			int minor = 0;
+
+			if (std::sscanf(desc.DxilProfile.c_str(), "sm_%d_%d", &major, &minor) == 2 && major * 100 + minor < 608)
+			{
+				common.push_back("-DSWIM_DRAW_BASE_ROOT_CONSTANTS=1");
+			}
+
+			std::error_code error;
+			const auto tmpRegisters = fs::path(base).concat(".tmp.dxil.json");
+			const auto tmpPart = fs::path(base).concat(".tmp.part");
+			auto arguments = common;
+			arguments.insert(arguments.end(), { "-target", "hlsl", "-reflection-json", tmpRegisters.string() });
+
+			if (!program.Entry.empty())
+			{
+				arguments.insert(arguments.end(), { "-entry", program.Entry });
+			}
+
+			const auto hlsl = Swim::Platform::RunProcess(arguments);
+			const auto registers = Swim::ShaderCompiler::LoadSlangReflectionJson(tmpRegisters);
+
+			if (!hlsl.Started || hlsl.ExitCode != 0 || !registers || registers.Reflection.EntryPoints.empty())
+			{
+				fs::remove(tmpRegisters, error);
+				return hlsl.Started ? hlsl.Output + registers.Error : "slangc did not start: " + hlsl.Error;
+			}
+
+			std::string bundle;
+
+			for (const auto& entry : registers.Reflection.EntryPoints)
+			{
+				arguments = common;
+				arguments.insert(arguments.end(),
+					{ "-target", "dxil", "-dxc-path", desc.DxcDirectory.string(), "-entry", entry.Name, "-o", tmpPart.string() });
+				const auto run = Swim::Platform::RunProcess(arguments);
+				std::string part;
+
+				if (!run.Started || run.ExitCode != 0 || !ReadBytes(tmpPart, part) || part.empty())
+				{
+					fs::remove(tmpRegisters, error);
+					fs::remove(tmpPart, error);
+					return run.Started ? run.Output : "slangc did not start: " + run.Error;
+				}
+
+				bundle += part;
+				fs::remove(tmpPart, error);
+			}
+
+			std::string reflection;
+			ReadBytes(tmpRegisters, reflection);
+			fs::remove(tmpRegisters, error);
+			const auto queries = Swim::ShaderCompiler::FindNativeSizeQueries(hlsl.Output);
+			const auto open = reflection.find('{');
+
+			if (!queries.empty() && open != std::string::npos)
+			{
+				reflection.insert(open + 1, "\"nativeSizeQueries\":" + queries + ",");
+			}
+
+			const auto dxil = fs::path(base).concat(".dxil");
+			const auto json = fs::path(base).concat(".dxil.reflection.json");
+			const auto tmpDxil = fs::path(base).concat(".tmp.dxil");
+
+			if (!WriteBytes(json, reflection) || !WriteBytes(tmpDxil, bundle))
+			{
+				return "cannot write " + dxil.string();
+			}
+
+			fs::rename(tmpDxil, dxil, error);
+			return error ? "cannot write " + dxil.string() + ": " + error.message() : std::string();
+		}
+
 		Result Compile(Program& program) const
 		{
 			Result result;
@@ -315,6 +424,11 @@ namespace Engine
 			for (const auto& argument : arguments)
 			{
 				hash.Add(argument);
+			}
+
+			if (!desc.DxcDirectory.empty())
+			{
+				hash.Add(desc.DxilProfile);
 			}
 
 			for (const auto& file : program.Files)
@@ -368,6 +482,26 @@ namespace Engine
 				}
 
 				program.Files = std::move(files);
+			}
+
+			// The DXIL binds with the SPIR-V reflection's interface (its registers matched by name).
+			if (!desc.DxcDirectory.empty())
+			{
+				const auto dxil = fs::path(base).concat(".dxil");
+
+				if (!fs::is_regular_file(dxil, error) || !fs::is_regular_file(fs::path(base).concat(".dxil.reflection.json"), error))
+				{
+					if (auto log = CompileDxil(program, base); !log.empty())
+					{
+						result.Log = std::move(log);
+						return result;
+					}
+				}
+
+				result.Compiled = true;
+				result.Bytecode = dxil;
+				result.Reflection = json;
+				return result;
 			}
 
 			result.Compiled = true;

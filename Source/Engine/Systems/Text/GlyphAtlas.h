@@ -105,6 +105,15 @@ namespace Swim::Text
 		const GlyphAtlasDesc& GetDesc() const { return desc; }
 
 	  private:
+		struct Shelf
+		{
+			std::uint32_t Page = 0;
+			std::uint32_t X = 1;
+			std::uint32_t Y = 1;
+			std::uint32_t RowHeight = 0;
+		};
+
+		Shelf FindShelf(AtlasPageFormat format, std::uint32_t width, std::uint32_t height) const;
 
 		struct Key
 		{

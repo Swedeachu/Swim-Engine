@@ -112,7 +112,9 @@ namespace Swim::Render
 				continue;
 			}
 
-			const auto bytes = CheckedAdd(resource.Buffer.Size, std::max(resource.Alignment, padding));
+			// An element stride costs fewer than stride extra alignment steps.
+			const auto stridePadding = resource.ElementStride ? std::max(resource.Alignment, padding) * resource.ElementStride : 0;
+			const auto bytes = CheckedAdd(CheckedAdd(resource.Buffer.Size, std::max(resource.Alignment, padding)), stridePadding);
 
 			if (resource.Staging == Internal::GraphStaging::Upload)
 			{
@@ -133,7 +135,7 @@ namespace Swim::Render
 
 			for (auto r : uploads)
 			{
-				auto slice = s.Upload->Allocate(resources[r].Buffer.Size, resources[r].Alignment);
+				auto slice = s.Upload->Allocate(resources[r].Buffer.Size, resources[r].Alignment, resources[r].ElementStride);
 
 				if (!slice)
 				{

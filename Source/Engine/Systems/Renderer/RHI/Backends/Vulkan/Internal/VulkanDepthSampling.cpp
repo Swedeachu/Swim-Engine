@@ -29,7 +29,9 @@ namespace Swim::RhiVulkan
 
 		RequireVulkanDevice(state);
 
-		if (!ValidateTextureDesc(desc) || desc.Samples != Rhi::SampleCount::X1 ||
+		// Multisampled depth is sampled per sample (Texture2DMS): 2D, one mip.
+		if (!ValidateTextureDesc(desc) ||
+			(desc.Samples != Rhi::SampleCount::X1 && (desc.Dimension != Rhi::TextureDimension::Texture2D || desc.MipLevels != 1)) ||
 			(desc.Dimension != Rhi::TextureDimension::Texture2D && desc.Dimension != Rhi::TextureDimension::TextureCube) ||
 			desc.MipLevels > static_cast<std::uint32_t>(std::bit_width(std::max(desc.Extent.Width, desc.Extent.Height))) ||
 			!SupportsVulkanDepthSampling(state, desc.PixelFormat))
@@ -49,7 +51,7 @@ namespace Swim::RhiVulkan
 
 		return desc.Extent.Width <= properties.maxExtent.width && desc.Extent.Height <= properties.maxExtent.height &&
 			desc.Extent.Depth <= properties.maxExtent.depth && desc.MipLevels <= properties.maxMipLevels &&
-			desc.ArrayLayers <= properties.maxArrayLayers && (properties.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0;
+			desc.ArrayLayers <= properties.maxArrayLayers && (properties.sampleCounts & ToVkSampleCount(desc.Samples)) != 0;
 	}
 
 } // namespace Swim::RhiVulkan

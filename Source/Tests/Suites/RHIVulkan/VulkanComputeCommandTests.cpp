@@ -94,7 +94,7 @@ SWIM_TEST("RHI.Vulkan.ComputeCommand", "DispatchAxesAndZeroCountsOnDedicatedFami
 	SWIM_CHECK_THROWS(capture.Commands->Dispatch(1, 1, 1), std::logic_error);
 }
 
-SWIM_TEST("RHI.Vulkan.ComputeCommand", "PipelineSwitchRequiresExplicitRebindAndRenderingRejectsCompute")
+SWIM_TEST("RHI.Vulkan.ComputeCommand", "PipelineSwitchKeepsEachBindPointsTablesAndRenderingRejectsCompute")
 {
 	ComputeCommands capture;
 	auto graphics = capture.MakePipeline();
@@ -104,8 +104,9 @@ SWIM_TEST("RHI.Vulkan.ComputeCommand", "PipelineSwitchRequiresExplicitRebindAndR
 	capture.Bind();
 	capture.Commands->BindGraphicsPipeline(*graphics);
 	SWIM_CHECK_THROWS(capture.Commands->Dispatch(1, 1, 1), std::logic_error);
+	// The compute bind point keeps its table across the graphics pipeline.
 	capture.Commands->BindComputePipeline(*capture.Pipeline);
-	SWIM_CHECK_THROWS(capture.Commands->Dispatch(1, 1, 1), std::logic_error);
+	capture.Commands->Dispatch(1, 1, 1);
 	capture.Commands->BindDescriptorTable(1, *capture.Table);
 	capture.Commands->Dispatch(1, 1, 1); // Compatible constants survive binding alone.
 	RhiVulkan::VulkanTexture target{ capture.State, VK_NULL_HANDLE, { Rhi::TextureDimension::Texture2D,
@@ -120,7 +121,7 @@ SWIM_TEST("RHI.Vulkan.ComputeCommand", "PipelineSwitchRequiresExplicitRebindAndR
 	SWIM_CHECK_THROWS(capture.Commands->Draw(3, 1, 0, 0), std::logic_error);
 	capture.Commands->EndRendering();
 	capture.Commands->Dispatch(1, 1, 1);
-	SWIM_CHECK_EQUAL(capture.Dispatches.size(), 2u);
+	SWIM_CHECK_EQUAL(capture.Dispatches.size(), 3u);
 }
 
 SWIM_TEST("RHI.Vulkan.ComputeCommand", "ForeignPipelineWrongTablesAndBadPushDoNotDisturbGoodState")

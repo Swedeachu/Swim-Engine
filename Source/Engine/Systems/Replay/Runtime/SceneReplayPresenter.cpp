@@ -87,58 +87,83 @@ namespace Engine
 			return { f, f, f };
 		}
 
-		// Environment keys that drive post-processing directly (the rest go to console
-		// variables). False for any other name.
-		bool ApplyPost(Swim::Render::PostProcessSettings& post, const std::string& name, const Value& value)
+		using PostProcessSettings = Swim::Render::PostProcessSettings;
+
+		// Environment keys that drive post-processing directly (the rest go to console variables).
+		struct PostKey
 		{
-			if (name == "post.exposure")
+			std::string_view Name;
+			void (*Apply)(PostProcessSettings& post, const Value& value);
+		};
+
+		constexpr PostKey PostKeys[] = {
+			{ "post.exposure",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Exposure.Compensation = ScalarOf(value);
+				} },
+			{ "post.ev100",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Exposure.Mode = Swim::Render::ExposureMode::Manual;
+					post.Exposure.ManualEv100 = ScalarOf(value);
+				} },
+			{ "grade.temperature",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Grading.Temperature = std::clamp(ScalarOf(value), -100.0f, 100.0f);
+				} },
+			{ "grade.tint",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Grading.Tint = std::clamp(ScalarOf(value), -100.0f, 100.0f);
+				} },
+			{ "grade.contrast",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Grading.Contrast = std::max(ScalarOf(value), 0.01f);
+				} },
+			{ "grade.saturation",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Grading.Saturation = std::max(ScalarOf(value), 0.0f);
+				} },
+			{ "grade.slope",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Grading.Slope = ColorOf(value);
+				} },
+			{ "grade.offset",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Grading.Offset = ColorOf(value);
+				} },
+			{ "grade.power",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					const std::array<float, 3> power = ColorOf(value);
+					post.Grading.Power = { std::max(power[0], 0.01f), std::max(power[1], 0.01f), std::max(power[2], 0.01f) };
+				} },
+			{ "bloom.intensity",
+				[](PostProcessSettings& post, const Value& value)
+				{
+					post.Bloom.Intensity = std::max(ScalarOf(value), 0.0f);
+				} },
+		};
+
+		// False for a name that is not a post key.
+		bool ApplyPost(PostProcessSettings& post, const std::string& name, const Value& value)
+		{
+			for (const auto& key : PostKeys)
 			{
-				post.Exposure.Compensation = ScalarOf(value);
-			}
-			else if (name == "post.ev100")
-			{
-				post.Exposure.Mode = Swim::Render::ExposureMode::Manual;
-				post.Exposure.ManualEv100 = ScalarOf(value);
-			}
-			else if (name == "grade.temperature")
-			{
-				post.Grading.Temperature = std::clamp(ScalarOf(value), -100.0f, 100.0f);
-			}
-			else if (name == "grade.tint")
-			{
-				post.Grading.Tint = std::clamp(ScalarOf(value), -100.0f, 100.0f);
-			}
-			else if (name == "grade.contrast")
-			{
-				post.Grading.Contrast = std::max(ScalarOf(value), 0.01f);
-			}
-			else if (name == "grade.saturation")
-			{
-				post.Grading.Saturation = std::max(ScalarOf(value), 0.0f);
-			}
-			else if (name == "grade.slope")
-			{
-				post.Grading.Slope = ColorOf(value);
-			}
-			else if (name == "grade.offset")
-			{
-				post.Grading.Offset = ColorOf(value);
-			}
-			else if (name == "grade.power")
-			{
-				const std::array<float, 3> power = ColorOf(value);
-				post.Grading.Power = { std::max(power[0], 0.01f), std::max(power[1], 0.01f), std::max(power[2], 0.01f) };
-			}
-			else if (name == "bloom.intensity")
-			{
-				post.Bloom.Intensity = std::max(ScalarOf(value), 0.0f);
-			}
-			else
-			{
-				return false;
+				if (key.Name == name)
+				{
+					key.Apply(post, value);
+					return true;
+				}
 			}
 
-			return true;
+			return false;
 		}
 
 		bool IsPostName(std::string_view name)

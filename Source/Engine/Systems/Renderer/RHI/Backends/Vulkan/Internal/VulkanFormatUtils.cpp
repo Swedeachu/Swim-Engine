@@ -156,6 +156,7 @@ namespace Swim::RhiVulkan
 			case Rhi::SampleCount::X2: return VK_SAMPLE_COUNT_2_BIT;
 			case Rhi::SampleCount::X4: return VK_SAMPLE_COUNT_4_BIT;
 			case Rhi::SampleCount::X8: return VK_SAMPLE_COUNT_8_BIT;
+			case Rhi::SampleCount::X16: return VK_SAMPLE_COUNT_16_BIT;
 			default: return VK_SAMPLE_COUNT_1_BIT;
 			}
 		}

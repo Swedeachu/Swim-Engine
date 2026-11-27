@@ -78,9 +78,11 @@ namespace Swim::Rhi
 		UploadArena& operator=(const UploadArena&) = delete;
 
 		// Alignment is a buffer offset constraint, not a typed CPU-pointer promise.
+		// A nonzero stride also makes the offset a multiple of it (structured-buffer
+		// views that address whole elements).
 		// Empty optional means capacity exhaustion; invalid sizes/alignment throw.
 		// Failed allocation leaves the cursor and all earlier bytes unchanged.
-		std::optional<UploadSlice> Allocate(std::uint64_t size, std::uint64_t alignment = 4)
+		std::optional<UploadSlice> Allocate(std::uint64_t size, std::uint64_t alignment = 4, std::uint64_t stride = 0)
 		{
 			if (size == 0 || !IsPowerOfTwo(alignment))
 			{
@@ -89,7 +91,15 @@ namespace Swim::Rhi
 
 			const auto mapped = buffer->GetMappedWriteSpan();
 			alignment = std::max(alignment, minimumAlignment);
-			const std::uint64_t padding = (alignment - (used & (alignment - 1))) & (alignment - 1);
+			std::uint64_t padding = (alignment - (used & (alignment - 1))) & (alignment - 1);
+
+			// At most stride steps: offsets that are multiples of the alignment repeat
+			// modulo the stride with that period.
+			for (std::uint64_t step = 0; stride != 0 && (used + padding) % stride != 0 && step < stride; ++step)
+			{
+				padding += alignment;
+			}
+
 			const std::uint64_t remaining = GetCapacity() - used;
 
 			if (padding > remaining || size > remaining - padding)

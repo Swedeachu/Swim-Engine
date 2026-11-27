@@ -76,7 +76,8 @@ namespace Engine
 	};
 
 	// Loads the engine's precompiled Slang programs at runtime (Phase 23): each program is
-	// <root>/<Name>.spv plus its <Name>.reflection.json sidecar, produced at build time by
+	// <root>/<Name><bytecode extension> (.spv, or .dxil on D3D12) plus its <Name>.reflection.json
+	// sidecar, produced at build time by
 	// swim_add_slang_program and deployed next to the executable (Shaders/Runtime). The
 	// reflection is converted to the RHI program interface with the ShaderCompiler tool
 	// library; entry points are the Slang conventions vertexMain / fragmentMain /
@@ -92,7 +93,7 @@ namespace Engine
 
 		// Built-ins are registered from the build catalog. Custom programs use exactly the
 		// same runtime path. Relative artifact paths are resolved against GetRoot().
-		// A name that was never registered still loads when <root>/<Name>.spv and its
+		// A name that was never registered still loads when its bytecode and its
 		// reflection sidecar exist (programs an application added with
 		// swim_add_runtime_shader after the engine's catalog was generated).
 		void Register(RuntimeShaderDesc desc);
@@ -121,7 +122,7 @@ namespace Engine
 
 		// The directory holding the runtime programs: SWIM_SHADER_DIR when set, else the
 		// first of <exe dir>/Shaders/Runtime and the given fallbacks that holds
-		// ForwardOpaque.spv. Empty when none does.
+		// the ForwardOpaque program. Empty when none does.
 		static std::filesystem::path FindRoot(
 			const std::filesystem::path& executableDirectory, std::span<const std::filesystem::path> fallbacks = {});
 
@@ -137,6 +138,7 @@ namespace Engine
 
 		Swim::Rhi::Device& device;
 		std::filesystem::path root;
+		std::string bytecodeExtension; // Swim::Rhi::ShaderBytecodeExtension of the device's API.
 		std::unordered_map<std::string, RuntimeShaderDesc> registrations;
 		mutable std::unordered_map<std::string, RuntimeShaderDesc> discovered;
 		mutable std::unordered_map<std::string, std::shared_ptr<const Loaded>> loadedPrograms;

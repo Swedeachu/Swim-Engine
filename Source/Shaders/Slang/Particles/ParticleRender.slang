@@ -2,6 +2,7 @@
 // by the push constant, four corners from the index buffer {0, 1, 2, 2, 1, 3}.
 // Particles::BillboardCorner places them; Particles::ShadeFragment shades them.
 // Bindings follow ParticleRenderBindings; space 1 is the BindlessResourceTable.
+#include "Resources/DrawIndex.slang"
 #include "Particles/ParticleRecords.slang"
 
 [[vk::binding(0, 0)]] StructuredBuffer<ParticleFrame> Frame;
@@ -31,12 +32,11 @@ struct VertexOutput
 	nointerpolation float2 Random : TEXCOORD6; // x: per-particle random; y: normalized age.
 };
 
-// gl_VertexIndex / gl_InstanceIndex directly (SV_Vulkan*): every draw of this program
-// starts at vertex, index offset and instance 0, so they equal SV_VertexID/SV_InstanceID
-// without the DrawParameters capability (absent on some devices, e.g. SwiftShader).
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint instanceIdInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint instanceId = DrawInstanceIndex(instanceIdInput);
 	const uint emitterIndex = Draw.Emitter;
 	const uint firstSlot = Emitters[emitterIndex].FirstSlot;
 	const Particle p = Particles[DrawList[firstSlot + instanceId]];

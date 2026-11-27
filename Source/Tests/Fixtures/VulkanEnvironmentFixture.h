@@ -6,6 +6,7 @@
 #include "Engine/Systems/Renderer/Environment/EnvironmentReference.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
 
@@ -20,7 +21,7 @@ namespace Swim::Testing::EnvironmentSmoke
 
 	inline std::vector<std::byte> ReadSpirv(const char* path)
 	{
-		std::ifstream file(path, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(path), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytes(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -33,7 +34,7 @@ namespace Swim::Testing::EnvironmentSmoke
 	{
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(path);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, path);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		return converted;
 	}
@@ -79,8 +80,7 @@ namespace Swim::Testing::EnvironmentSmoke
 		const auto& programInterface = reflected.Interface;
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytes };
 		ComputeProgram program;
-		program.Program = device.CreateShaderProgram({ { &stage, 1 },
-			{ programInterface.DescriptorSchemas, programInterface.PushConstants, programInterface.ComputeThreadGroupSize }, label });
+		program.Program = device.CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(programInterface), label });
 		SWIM_REQUIRE(program.Program);
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), label });
 		SWIM_REQUIRE(program.Layout);

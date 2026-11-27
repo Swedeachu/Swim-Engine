@@ -10,6 +10,8 @@ static const uint GpuViewFlagForwardDepth = 1u << 3;
 static const uint GpuViewFlagDisableOcclusion = 1u << 4;
 static const uint GpuViewFlagShadowCasters = 1u << 5;
 static const uint GpuViewFlagOverlay = 1u << 6;
+static const uint GpuViewFlagStaticCasters = 1u << 7;
+static const uint GpuViewFlagDynamicCasters = 1u << 8;
 
 // VisibilityPhase.
 static const uint VisibilityPhaseSingle = 0;

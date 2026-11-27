@@ -379,6 +379,61 @@ namespace Swim::Text
 			}
 		}
 
+		// Shapes [b, e) at bidi level and appends its run, glyphs and graphemes at pen.
+		void EmitRun(std::uint32_t b, std::uint32_t e, std::uint8_t level, std::uint32_t lineIndex, float& pen, FaceMetrics& metrics)
+		{
+			const auto shaped = Shape(b, e, FaceAt[b], ScriptAt[b], level);
+			TextRun run;
+			run.Begin = b;
+			run.End = e;
+			run.Face = FaceAt[b];
+			run.Script = ScriptAt[b];
+			run.Level = level;
+			run.X = pen;
+			run.FirstGlyph = static_cast<std::uint32_t>(L.glyphs.size());
+			RecordGraphemes(shaped, b, e, pen, (level & 1) != 0, lineIndex);
+
+			for (const auto& glyph : shaped.Glyphs)
+			{
+				L.glyphs.push_back({ glyph.Glyph, run.Face, glyph.Cluster, pen + glyph.OffsetX, -glyph.OffsetY, glyph.AdvanceX });
+				pen += glyph.AdvanceX;
+			}
+
+			L.missingGlyphs += shaped.MissingGlyphs;
+			run.GlyphCount = static_cast<std::uint32_t>(L.glyphs.size()) - run.FirstGlyph;
+			run.Width = pen - run.X;
+			Include(metrics, run.Face);
+			L.runs.push_back(run);
+		}
+
+		// The width of the hanging whitespace at the end of the line's graphemes.
+		float TrailingWidth(const LineRange& range, std::size_t firstGrapheme) const
+		{
+			float trailing = 0.0f;
+
+			for (std::uint32_t offset = range.End; offset > range.Begin;)
+			{
+				const std::uint32_t start = GraphemeStartOf(static_cast<std::uint32_t>(PreviousUtf8(Text, offset)));
+
+				if (!IsHangingWhitespace(CodePointAt(start)))
+				{
+					break;
+				}
+
+				for (std::size_t g = firstGrapheme; g < L.graphemes.size(); ++g)
+				{
+					if (L.graphemes[g].Begin == start)
+					{
+						trailing += L.graphemes[g].Right - L.graphemes[g].Left;
+					}
+				}
+
+				offset = start;
+			}
+
+			return trailing;
+		}
+
 		void EmitLine(const LineRange& range, const _SBParagraph* paragraph, std::uint8_t baseLevel)
 		{
 			TextLine line;
@@ -425,29 +480,7 @@ namespace Swim::Text
 
 					for (const auto& [b, e] : pieces)
 					{
-						const auto shaped = Shape(b, e, FaceAt[b], ScriptAt[b], level);
-						TextRun run;
-						run.Begin = b;
-						run.End = e;
-						run.Face = FaceAt[b];
-						run.Script = ScriptAt[b];
-						run.Level = level;
-						run.X = pen;
-						run.FirstGlyph = static_cast<std::uint32_t>(L.glyphs.size());
-						RecordGraphemes(shaped, b, e, pen, (level & 1) != 0, lineIndex);
-
-						for (const auto& glyph : shaped.Glyphs)
-						{
-							L.glyphs.push_back(
-								{ glyph.Glyph, run.Face, glyph.Cluster, pen + glyph.OffsetX, -glyph.OffsetY, glyph.AdvanceX });
-							pen += glyph.AdvanceX;
-						}
-
-						L.missingGlyphs += shaped.MissingGlyphs;
-						run.GlyphCount = static_cast<std::uint32_t>(L.glyphs.size()) - run.FirstGlyph;
-						run.Width = pen - run.X;
-						Include(metrics, run.Face);
-						L.runs.push_back(run);
+						EmitRun(b, e, level, lineIndex, pen, metrics);
 					}
 				}
 			}
@@ -455,27 +488,7 @@ namespace Swim::Text
 			line.RunCount = static_cast<std::uint32_t>(L.runs.size()) - line.FirstRun;
 			// Trailing hanging whitespace takes the paragraph level (L1) and hangs at the
 			// paragraph's end: to the right in LTR paragraphs, to the left in RTL ones.
-			float trailing = 0.0f;
-
-			for (std::uint32_t offset = range.End; offset > range.Begin;)
-			{
-				const std::uint32_t start = GraphemeStartOf(static_cast<std::uint32_t>(PreviousUtf8(Text, offset)));
-
-				if (!IsHangingWhitespace(CodePointAt(start)))
-				{
-					break;
-				}
-
-				for (std::size_t g = firstGrapheme; g < L.graphemes.size(); ++g)
-				{
-					if (L.graphemes[g].Begin == start)
-					{
-						trailing += L.graphemes[g].Right - L.graphemes[g].Left;
-					}
-				}
-
-				offset = start;
-			}
+			const float trailing = TrailingWidth(range, firstGrapheme);
 
 			line.Width = std::max(0.0f, pen - trailing);
 			line.X = (baseLevel & 1) != 0 ? trailing : 0.0f;

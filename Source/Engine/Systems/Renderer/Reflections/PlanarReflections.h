@@ -203,6 +203,19 @@ namespace Swim::Render::PlanarReflections
 		float Urgency(const Slot& slot, const Wanted& wanted, const ViewCamera& camera, double time,
 			const PlanarReflectionSettings& settings, bool moverInside, bool& dynamic) const;
 
+		// The phases of Update: faces of every reflector (culled), largest first, coplanar ones
+		// merged into groups, each group's view, slot and urgency, this frame's captures, and
+		// the records of every captured group.
+		void ExpandReflectors(
+			std::span<const PlanarReflectorDesc> reflectors, const ViewCamera& camera, const PlanarReflectionSettings& settings);
+		void SortCandidates();
+		void MergeCoplanar(const PlanarReflectionSettings& settings, std::uint32_t maxPlanes);
+		void RankGroups(const ViewCamera& camera, std::uint64_t frame, double time, const PlanarReflectionSettings& settings,
+			std::span<const ReflectionProbeMover> movers);
+		void TakeCaptures(
+			const ViewCamera& camera, double time, const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers);
+		void WriteRecords(const PlanarReflectionSettings& settings);
+
 		// A mover inside the view (its frustum, far: CullPlane), within `range` of the reflector.
 		static bool SeesMover(const Wanted& view, std::span<const ReflectionProbeMover> movers, float range);
 

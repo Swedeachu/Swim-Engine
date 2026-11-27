@@ -2,6 +2,8 @@
 // the UI composited, sRGB-encoded RGBA8) onto a swapchain image with one fullscreen
 // triangle. When the swapchain format is itself *Srgb the hardware encodes on write, so
 // the source is decoded to linear first and the result is bit-exact either way.
+#include "Resources/DrawIndex.slang"
+
 [[vk::binding(0, 0)]] Texture2D<float4> Source;
 [[vk::binding(1, 0)]] SamplerState SourceSampler;
 
@@ -21,11 +23,10 @@ struct VertexOutput
 	float2 Uv : TEXCOORD0;
 };
 
-// gl_VertexIndex directly (SV_VulkanVertexID): the fullscreen triangle is drawn from
-// vertex 0, so it equals SV_VertexID without the DrawParameters capability.
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	static const float2 positions[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };
 	VertexOutput output;
 	output.Position = float4(positions[vertexId], 0.0, 1.0);

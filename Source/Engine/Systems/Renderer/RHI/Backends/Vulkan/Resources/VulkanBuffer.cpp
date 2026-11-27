@@ -11,7 +11,12 @@ namespace Swim::RhiVulkan
 
 		if (buffer != VK_NULL_HANDLE && allocation != nullptr)
 		{
-			vmaDestroyBuffer(state->Allocator, buffer, allocation);
+			// Frames still in flight may use it: released once the GPU passes them.
+			state->Deferred->Release(
+				[allocator = state->Allocator, buffer = buffer, allocation = allocation]
+				{
+					vmaDestroyBuffer(allocator, buffer, allocation);
+				});
 		}
 	}
 

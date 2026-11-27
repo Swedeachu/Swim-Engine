@@ -297,6 +297,49 @@ namespace Swim::UI
 			return s;
 		}
 
+		// Hue: six segments between the primaries and secondaries.
+		UiNodeId AddHueStrip(UiDocument& document, UiNodeId root, float size)
+		{
+			const auto hue = Box(document, root, Strip(size));
+
+			for (int i = 0; i < 6; ++i)
+			{
+				UiStyle segment;
+				segment.Grow = 1.0f;
+				const auto from = HsvToLinear(float(i) / 6.0f, 1.0f, 1.0f);
+				const auto to = HsvToLinear(float(i + 1) / 6.0f, 1.0f, 1.0f);
+				segment.Background = { from[0], from[1], from[2], 1.0f };
+				segment.BackgroundEnd = { to[0], to[1], to[2], 1.0f };
+				segment.Gradient = UiGradient::Horizontal;
+				Box(document, hue, segment);
+			}
+
+			return hue;
+		}
+
+		// The colour preview swatch and the hex field.
+		void AddPreviewRow(UiDocument& document, UiNodeId root, float size, PickerState& state)
+		{
+			UiStyle row;
+			row.Flow = UiFlow::Row;
+			row.Gap = 8.0f;
+			row.AlignItems = UiAlign::Center;
+			const auto line = Box(document, root, row);
+			UiStyle preview;
+			preview.Width = UiLength::Pixels(28.0f);
+			preview.Height = UiLength::Pixels(28.0f);
+			preview.CornerRadius = 4.0f;
+			preview.BorderWidth = 1.0f;
+			preview.BorderColor = { 1.0f, 1.0f, 1.0f, 0.35f };
+			state.Preview = Box(document, line, preview);
+			UiTextEditOptions options;
+			options.MaxBytes = 12;
+			state.Hex = CreateTextField(document, line, options);
+			auto hexStyle = document.GetStyle(state.Hex);
+			hexStyle.Width = UiLength::Pixels(std::max(size - 36.0f, 60.0f));
+			document.SetStyle(state.Hex, hexStyle);
+		}
+
 	} // namespace
 
 	UiNodeId CreateColorPicker(
@@ -334,20 +377,7 @@ namespace Swim::UI
 		Box(document, state->Square, shade);
 		state->SquareMarker = Box(document, state->Square, Marker(12.0f, 12.0f));
 
-		// Hue: six segments between the primaries and secondaries.
-		const auto hue = Box(document, root, Strip(size));
-
-		for (int i = 0; i < 6; ++i)
-		{
-			UiStyle segment;
-			segment.Grow = 1.0f;
-			const auto from = HsvToLinear(float(i) / 6.0f, 1.0f, 1.0f);
-			const auto to = HsvToLinear(float(i + 1) / 6.0f, 1.0f, 1.0f);
-			segment.Background = { from[0], from[1], from[2], 1.0f };
-			segment.BackgroundEnd = { to[0], to[1], to[2], 1.0f };
-			segment.Gradient = UiGradient::Horizontal;
-			Box(document, hue, segment);
-		}
+		const auto hue = AddHueStrip(document, root, size);
 
 		state->HueMarker = Box(document, hue, Marker(6.0f, 18.0f));
 
@@ -369,24 +399,7 @@ namespace Swim::UI
 			};
 		}
 
-		UiStyle row;
-		row.Flow = UiFlow::Row;
-		row.Gap = 8.0f;
-		row.AlignItems = UiAlign::Center;
-		const auto line = Box(document, root, row);
-		UiStyle preview;
-		preview.Width = UiLength::Pixels(28.0f);
-		preview.Height = UiLength::Pixels(28.0f);
-		preview.CornerRadius = 4.0f;
-		preview.BorderWidth = 1.0f;
-		preview.BorderColor = { 1.0f, 1.0f, 1.0f, 0.35f };
-		state->Preview = Box(document, line, preview);
-		UiTextEditOptions options;
-		options.MaxBytes = 12;
-		state->Hex = CreateTextField(document, line, options);
-		auto hexStyle = document.GetStyle(state->Hex);
-		hexStyle.Width = UiLength::Pixels(std::max(size - 36.0f, 60.0f));
-		document.SetStyle(state->Hex, hexStyle);
+		AddPreviewRow(document, root, size, *state);
 
 		auto& squareArea = document.AttachControl<PickArea>(state->Square);
 		squareArea.OnPick = [state](float x, float y, bool done)

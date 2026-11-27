@@ -25,6 +25,14 @@ namespace Swim::Render
 		static constexpr std::uint32_t Count = 4;
 	};
 
+	struct ScreenSpaceLinearDepthBindings // SwimScreenSpaceLinearDepth: the AO's half-precision view distance.
+	{
+		static constexpr std::uint32_t Depth = 0;
+		static constexpr std::uint32_t Params = 1;
+		static constexpr std::uint32_t Output = 2; // RWTexture2D<float> r16f: distance, negative on overlays, 0 for the sky.
+		static constexpr std::uint32_t Count = 3;
+	};
+
 	struct ScreenSpaceBlurBindings // SwimScreenSpaceBlur: 5x5 depth-aware blur.
 	{
 		static constexpr std::uint32_t Source = 0; // Texture2D<float>: raw visibility.

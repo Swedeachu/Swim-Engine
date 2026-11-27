@@ -7,15 +7,17 @@
 [[vk::binding(3, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> Output;
 
 // First-person overlay pixels (RenderObjectFlags::Overlay) sit in the reverse-Z depth range
-// above this (ForwardOverlayDepth): they neither receive nor cast ambient occlusion.
-static const float ScreenSpaceOverlayDepth = 0.99;
+// above ScreenSpaceOverlayDepth: they neither receive nor cast ambient occlusion.
 
 float Gtao(ScreenSpaceView view, int x, int y)
 {
-	bool valid;
+	bool valid = false;
+	const bool linear = (Params[0].AoHalf & 2u) != 0u;
 	const float centerDepth = Depth.Load(int3(x, y, 0));
-	const float3 p = ScreenSpaceViewPosition(view, float(x) + 0.5, float(y) + 0.5, centerDepth, valid);
-	if (!valid || !(-p.z > 0.0) || centerDepth >= ScreenSpaceOverlayDepth)
+	const float3 p = linear ? ScreenSpaceLinearViewPosition(view, float(x) + 0.5, float(y) + 0.5, centerDepth)
+							: ScreenSpaceViewPosition(view, float(x) + 0.5, float(y) + 0.5, centerDepth, valid);
+	valid = linear ? centerDepth > 0.0 : valid && centerDepth < ScreenSpaceOverlayDepth;
+	if (!valid || !(-p.z > 0.0))
 	{
 		return 1.0;
 	}
@@ -85,10 +87,12 @@ float Gtao(ScreenSpaceView view, int x, int y)
 				{
 					continue;
 				}
-				bool sampleValid;
+				bool sampleValid = false;
 				const float sampleDepth = Depth.Load(int3(ix, iy, 0));
-				const float3 samplePosition = ScreenSpaceViewPosition(view, sx + 0.5, sy + 0.5, sampleDepth, sampleValid);
-				if (!sampleValid || sampleDepth >= ScreenSpaceOverlayDepth)
+				const float3 samplePosition = linear ? ScreenSpaceLinearViewPosition(view, sx + 0.5, sy + 0.5, sampleDepth)
+													 : ScreenSpaceViewPosition(view, sx + 0.5, sy + 0.5, sampleDepth, sampleValid);
+				sampleValid = linear ? sampleDepth > 0.0 : sampleValid && sampleDepth < ScreenSpaceOverlayDepth;
+				if (!sampleValid)
 				{
 					continue;
 				}
@@ -129,7 +133,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const ScreenSpaceView view = ScreenSpaceLoadView(Params);
 	// Half resolution: thread (x, y) traces the pixel of the 2 x 2 block at (2x, 2y) that
 	// ScreenSpaceHalfOffset picks this frame (the blur knows which).
-	const bool half = Params[0].AoHalf != 0u;
+	const bool half = (Params[0].AoHalf & 1u) != 0u;
 	if (half ? (id.x >= (view.Width + 1u) / 2u || id.y >= (view.Height + 1u) / 2u) : (id.x >= view.Width || id.y >= view.Height))
 	{
 		return;

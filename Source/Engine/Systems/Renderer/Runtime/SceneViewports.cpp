@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
+#include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceReference.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 
 #include <algorithm>
@@ -27,13 +28,43 @@ namespace Engine
 			std::array<float, 16> ClipFromLocal;
 			std::array<float, 12> NormalFromLocal;
 			std::array<float, 4> Tint;
+			// Local position of the eye (w 1) or, for orthographic views, the direction towards
+			// it (w 0): translucent draws keep only the faces turned towards it.
+			std::array<float, 4> LocalEye;
 			std::uint32_t Texture;
 			std::uint32_t Sampler;
 			float AlphaCutoff;
-			std::uint32_t Lit;
+			std::uint32_t Flags;
 		};
 
-		static_assert(sizeof(GpuDraw) == 144);
+		static_assert(sizeof(GpuDraw) == 160);
+
+		constexpr std::uint32_t DrawLit = 1u;
+		constexpr std::uint32_t DrawTranslucent = 2u;
+
+		// clipFromLocal^-1 (0, 0, 1, 0): with reverse-Z, the point (or direction) every view ray
+		// comes from, with the sign that points at the viewer.
+		std::array<float, 4> LocalEye(const std::array<float, 16>& clipFromLocal)
+		{
+			const auto inverse = R::ScreenSpace::Inverse(clipFromLocal);
+
+			if (!inverse)
+			{
+				return { 0.0f, 0.0f, 0.0f, 0.0f };
+			}
+
+			std::array<float, 4> eye{ (*inverse)[2], (*inverse)[6], (*inverse)[10], (*inverse)[14] };
+
+			if (std::abs(eye[3]) > 1.0e-6f)
+			{
+				for (auto& value : eye)
+				{
+					value /= std::abs(eye[3]);
+				}
+			}
+
+			return eye;
+		}
 
 		struct GpuConstants
 		{
@@ -102,6 +133,8 @@ namespace Engine
 		std::unique_ptr<S::Texture> Texture;
 		std::unique_ptr<S::TextureView> View;
 		S::TimelinePoint LastUse;
+		R::BindlessTextureHandle Handle; // Released at RetireAfter while Pending.
+		bool Pending = false;			 // Destroyed without a lastUse: waits for a frame completion.
 	};
 
 	S::GraphicsPipelineDesc SceneViewports::PipelineDesc(S::ShaderProgram& program, S::PipelineLayout& layout)
@@ -120,6 +153,18 @@ namespace Engine
 		pipeline.DepthStencil.DepthCompare = S::CompareOp::GreaterEqual; // Reverse-Z; the clear triangle sits at 0.
 		pipeline.Raster.Cull = S::CullMode::None;
 		pipeline.DebugName = "Scene viewport";
+		return pipeline;
+	}
+
+	S::GraphicsPipelineDesc SceneViewports::TranslucentPipelineDesc(S::ShaderProgram& program, S::PipelineLayout& layout)
+	{
+		static constexpr std::array<S::BlendAttachmentState, 1> Over{ S::BlendAttachmentState{ true, S::BlendFactor::One,
+			S::BlendFactor::OneMinusSourceAlpha, S::BlendOp::Add, S::BlendFactor::One, S::BlendFactor::OneMinusSourceAlpha, S::BlendOp::Add,
+			S::ColorWriteMask::All } };
+		S::GraphicsPipelineDesc pipeline = PipelineDesc(program, layout);
+		pipeline.BlendAttachments = Over;
+		pipeline.DepthStencil.DepthWrite = false;
+		pipeline.DebugName = "Scene viewport (translucent)";
 		return pipeline;
 	}
 
@@ -238,8 +283,15 @@ namespace Engine
 			return false;
 		}
 
-		bindless.Release(viewport->Handle, lastUse);
-		retired.push_back(std::make_unique<Retired>(Retired{ std::move(viewport->Texture), std::move(viewport->View), lastUse }));
+		const bool pending = !lastUse.Semaphore;
+
+		if (!pending)
+		{
+			bindless.Release(viewport->Handle, lastUse);
+		}
+
+		retired.push_back(std::make_unique<Retired>(
+			Retired{ std::move(viewport->Texture), std::move(viewport->View), lastUse, viewport->Handle, pending }));
 		viewport->Queue.clear();
 		viewport->Recorded = 0;
 		viewport->Initialized = false;
@@ -311,10 +363,9 @@ namespace Engine
 		return stats;
 	}
 
-	std::vector<R::GraphTexture> SceneViewports::Record(R::RenderGraph& graph, const R::GeometryHeap& geometry,
-		const R::GeometryGraphResources& pages, const R::AssetResidencyService& residency, const Program& program,
-		S::DescriptorTable& bindlessTable, std::uint32_t materialLinear, std::uint32_t materialPoint)
+	namespace
 	{
+
 		struct Call
 		{
 			std::uint32_t IndexCount = 0;
@@ -331,169 +382,150 @@ namespace Engine
 			GpuConstants Constants;
 			std::size_t FirstCall = 0;
 			std::size_t CallCount = 0;
+			std::size_t OpaqueCalls = 0; // The first calls; translucent ones follow, back to front.
 		};
 
-		std::vector<R::GraphTexture> textures;
-		lastItems = 0;
-
-		if (!program.Pipeline || !program.Layout)
+		// One viewport's ready scenes this frame.
+		struct ViewportBatch
 		{
-			return textures;
-		}
-
-		const auto meshOf = [&](const SceneViewportItem& item)
-		{
-			return resolver.Mesh ? resolver.Mesh(item.Mesh) : item.Mesh;
-		};
-		const auto textureOf = [&](const SceneViewportItem& item)
-		{
-			return resolver.Texture && item.Texture ? resolver.Texture(item.Texture) : item.Texture;
-		};
-		const auto resident = [&](const SceneViewportItem& item)
-		{
-			const auto texture = textureOf(item);
-			return residency.GetState(meshOf(item)) == R::AssetResidencyState::Resident &&
-				(!texture || residency.GetState(texture) == R::AssetResidencyState::Resident);
+			std::vector<GpuDraw> Draws;
+			std::vector<Call> Calls;
+			std::vector<Region> Regions;
 		};
 
-		for (auto& slot : viewports)
+		// Where scene items' meshes and textures come from.
+		struct SceneItemSource
 		{
-			auto& viewport = *slot;
-			viewport.Recorded = 0;
-			viewport.Written = false;
+			const R::GeometryHeap& Geometry;
+			const R::GeometryGraphResources& Pages;
+			const R::AssetResidencyService& Residency;
+			const SceneViewports::AssetResolver& Resolver;
+			std::uint32_t MaterialLinear = 0;
+			std::uint32_t MaterialPoint = 0;
 
-			if (!viewport.Texture)
+			auto MeshOf(const SceneViewportItem& item) const { return Resolver.Mesh ? Resolver.Mesh(item.Mesh) : item.Mesh; }
+
+			auto TextureOf(const SceneViewportItem& item) const
 			{
-				continue;
+				return Resolver.Texture && item.Texture ? Resolver.Texture(item.Texture) : item.Texture;
 			}
 
-			const auto texture =
-				graph.ImportTexture(*viewport.Texture, viewport.Initialized ? S::ResourceState::ShaderRead : S::ResourceState::Undefined);
-			graph.Export(texture, S::ResourceState::ShaderRead);
-			textures.push_back(texture);
-			// Scenes are drawn in order up to the first one still waiting for residency.
-			std::vector<GpuDraw> draws;
-			std::vector<Call> calls;
-			std::vector<Region> regions;
-
-			for (const auto& scene : viewport.Queue)
+			bool Resident(const SceneViewportItem& item) const
 			{
-				if (!std::all_of(scene.Items.begin(), scene.Items.end(), resident))
+				const auto texture = TextureOf(item);
+				return Residency.GetState(MeshOf(item)) == R::AssetResidencyState::Resident &&
+					(!texture || Residency.GetState(texture) == R::AssetResidencyState::Resident);
+			}
+		};
+
+		// Adds a scene's region, draws and calls; the number of items drawn. Opaque items come
+		// first in order, then translucent ones (when blended) from the farthest origin.
+		std::uint32_t AddScene(ViewportBatch& batch, const SceneViewportScene& scene, const SceneItemSource& source, bool blended)
+		{
+			auto& calls = batch.Calls;
+			std::uint32_t items = 0;
+			Region region{ scene.Region, {}, calls.size(), 0, 0 };
+			region.Constants.LightDirection = Direction(scene.LightDirection);
+			region.Constants.LightColor = { scene.LightColor[0], scene.LightColor[1], scene.LightColor[2], 0.0f };
+			region.Constants.Ambient = { scene.Ambient[0], scene.Ambient[1], scene.Ambient[2], 0.0f };
+			region.Constants.ClearColor = scene.ClearColor;
+			const auto clipFromWorld = R::MultiplyRowMajor(scene.Projection, scene.View);
+			// Reverse-Z depth of each translucent item's origin: the smallest is the farthest.
+			std::vector<std::pair<float, const SceneViewportItem*>> order;
+			order.reserve(scene.Items.size());
+
+			for (const auto& item : scene.Items)
+			{
+				if (!(blended && item.Translucent))
 				{
-					break;
+					order.emplace_back(0.0f, &item);
 				}
-
-				Region region{ scene.Region, {}, calls.size(), 0 };
-				region.Constants.LightDirection = Direction(scene.LightDirection);
-				region.Constants.LightColor = { scene.LightColor[0], scene.LightColor[1], scene.LightColor[2], 0.0f };
-				region.Constants.Ambient = { scene.Ambient[0], scene.Ambient[1], scene.Ambient[2], 0.0f };
-				region.Constants.ClearColor = scene.ClearColor;
-				const auto clipFromWorld = R::MultiplyRowMajor(scene.Projection, scene.View);
-
-				for (const auto& item : scene.Items)
-				{
-					const auto mesh = residency.GetGpuMesh(meshOf(item));
-					const auto* metadata = geometry.GetMetadata(mesh);
-
-					if (!metadata || metadata->VertexPage >= pages.Pages.size() || metadata->IndexPage >= pages.Pages.size() ||
-						metadata->IndexCount == 0)
-					{
-						continue;
-					}
-
-					GpuDraw draw{};
-					draw.ClipFromLocal = R::MultiplyRowMajor(clipFromWorld, item.Transform);
-					draw.NormalFromLocal = NormalMatrix(item.Transform);
-					draw.Tint = item.Tint;
-					draw.Texture = item.Texture ? residency.GetBindlessIndex(textureOf(item)) : 0u;
-					draw.Sampler = item.PointSampled ? materialPoint : materialLinear;
-					draw.AlphaCutoff = item.AlphaCutoff;
-					draw.Lit = item.Lit ? 1u : 0u;
-					const auto drawIndex = static_cast<std::uint32_t>(draws.size());
-					draws.push_back(draw);
-					const auto submeshes = geometry.GetSubmeshes(mesh);
-
-					if (submeshes.empty())
-					{
-						calls.push_back({ metadata->IndexCount, metadata->FirstIndex, std::int32_t(metadata->VertexOffset), drawIndex,
-							metadata->VertexPage, metadata->IndexPage });
-					}
-
-					for (const auto& submesh : submeshes)
-					{
-						calls.push_back({ submesh.IndexCount, submesh.FirstIndex, submesh.VertexOffset, drawIndex, metadata->VertexPage,
-							metadata->IndexPage });
-					}
-
-					++lastItems;
-				}
-
-				region.CallCount = calls.size() - region.FirstCall;
-				regions.push_back(region);
-				++viewport.Recorded;
 			}
 
-			if (regions.empty())
+			const auto opaqueItems = order.size();
+
+			for (const auto& item : scene.Items)
 			{
-				if (viewport.Initialized)
+				if (blended && item.Translucent)
+				{
+					const auto m = R::MultiplyRowMajor(clipFromWorld, item.Transform);
+					const float w = m[15];
+					order.emplace_back(std::abs(w) > 1.0e-12f ? m[11] / w : 0.0f, &item);
+				}
+			}
+
+			std::stable_sort(order.begin() + std::ptrdiff_t(opaqueItems), order.end(),
+				[](const auto& a, const auto& b)
+				{
+					return a.first < b.first;
+				});
+
+			for (std::size_t at = 0; at < order.size(); ++at)
+			{
+				if (at == opaqueItems)
+				{
+					region.OpaqueCalls = calls.size() - region.FirstCall;
+				}
+
+				const auto& item = *order[at].second;
+				const auto mesh = source.Residency.GetGpuMesh(source.MeshOf(item));
+				const auto* metadata = source.Geometry.GetMetadata(mesh);
+
+				if (!metadata || metadata->VertexPage >= source.Pages.Pages.size() || metadata->IndexPage >= source.Pages.Pages.size() ||
+					metadata->IndexCount == 0)
 				{
 					continue;
 				}
 
-				// Never drawn: clear it so the UI samples transparent black, not undefined texels.
-				regions.push_back({ { 0, 0, viewport.Desc.Width, viewport.Desc.Height }, {}, 0, 0 });
-			}
+				GpuDraw draw{};
+				draw.ClipFromLocal = R::MultiplyRowMajor(clipFromWorld, item.Transform);
+				draw.NormalFromLocal = NormalMatrix(item.Transform);
+				const bool translucent = blended && item.Translucent;
+				draw.LocalEye = translucent ? LocalEye(draw.ClipFromLocal) : std::array<float, 4>{};
+				draw.Tint = item.Tint;
+				draw.Texture = item.Texture ? source.Residency.GetBindlessIndex(source.TextureOf(item)) : 0u;
+				draw.Sampler = item.PointSampled ? source.MaterialPoint : source.MaterialLinear;
+				draw.AlphaCutoff = item.AlphaCutoff;
+				draw.Flags = (item.Lit ? DrawLit : 0u) | (translucent ? DrawTranslucent : 0u);
+				const auto drawIndex = static_cast<std::uint32_t>(batch.Draws.size());
+				batch.Draws.push_back(draw);
+				const auto submeshes = source.Geometry.GetSubmeshes(mesh);
 
-			viewport.Written = true;
-
-			// A dummy record keeps the draw buffer non-empty for clear-only scenes.
-			if (draws.empty())
-			{
-				draws.push_back({});
-			}
-
-			const auto name = viewport.Desc.DebugName;
-			const auto drawBuffer = graph.CreateUpload(std::as_bytes(std::span(draws)), name + " draws", S::BufferUsage::Storage, 16);
-			std::vector<std::uint32_t> usedPages;
-
-			for (const auto& call : calls)
-			{
-				for (const auto page : { call.VertexPage, call.IndexPage })
+				if (submeshes.empty())
 				{
-					if (std::find(usedPages.begin(), usedPages.end(), page) == usedPages.end())
-					{
-						usedPages.push_back(page);
-					}
+					calls.push_back({ metadata->IndexCount, metadata->FirstIndex, std::int32_t(metadata->VertexOffset), drawIndex,
+						metadata->VertexPage, metadata->IndexPage });
 				}
+
+				for (const auto& submesh : submeshes)
+				{
+					calls.push_back({ submesh.IndexCount, submesh.FirstIndex, submesh.VertexOffset, drawIndex, metadata->VertexPage,
+						metadata->IndexPage });
+				}
+
+				++items;
 			}
 
-			std::vector<R::GraphBuffer> pageBuffers;
+			region.CallCount = calls.size() - region.FirstCall;
 
-			for (const auto page : usedPages)
+			if (opaqueItems == order.size())
 			{
-				pageBuffers.push_back(pages.Pages[page]);
+				region.OpaqueCalls = region.CallCount;
 			}
 
-			S::TextureDesc depthDesc;
-			depthDesc.Extent = { viewport.Desc.Width, viewport.Desc.Height, 1 };
-			depthDesc.PixelFormat = S::Format::D32Float;
-			depthDesc.Usage = S::TextureUsage::DepthStencilAttachment;
-			depthDesc.DebugName = "Scene viewport depth";
-			const auto depth = graph.CreateTexture(depthDesc);
-			const bool whole =
-				regions.front().Rect == std::array<std::uint32_t, 4>{ 0, 0, viewport.Desc.Width, viewport.Desc.Height };
-			const bool load = viewport.Initialized && !whole;
-			const std::uint32_t width = viewport.Desc.Width, height = viewport.Desc.Height;
-			std::vector<std::pair<std::uint32_t, R::GraphBuffer>> pageMap;
+			batch.Regions.push_back(region);
+			return items;
+		}
 
-			for (std::size_t i = 0; i < usedPages.size(); ++i)
-			{
-				pageMap.emplace_back(usedPages[i], pageBuffers[i]);
-			}
+		// The geometry pages a viewport's calls read.
+		struct PageLookup
+		{
+			std::vector<std::pair<std::uint32_t, R::GraphBuffer>> Map;
+			R::GraphBuffer Fallback; // Clear-only scenes read no vertices.
 
-			const auto findPage = [pageMap, drawBuffer](std::uint32_t page)
+			R::GraphBuffer operator()(std::uint32_t page) const
 			{
-				for (const auto& [index, buffer] : pageMap)
+				for (const auto& [index, buffer] : Map)
 				{
 					if (index == page)
 					{
@@ -501,8 +533,176 @@ namespace Engine
 					}
 				}
 
-				return drawBuffer; // Clear-only scenes read no vertices.
+				return Fallback;
+			}
+		};
+
+		PageLookup CollectPages(const std::vector<Call>& calls, const R::GeometryGraphResources& pages, R::GraphBuffer fallback)
+		{
+			PageLookup lookup{ {}, fallback };
+
+			for (const auto& call : calls)
+			{
+				for (const auto page : { call.VertexPage, call.IndexPage })
+				{
+					if (std::find_if(lookup.Map.begin(), lookup.Map.end(),
+							[&](const auto& entry)
+							{
+								return entry.first == page;
+							}) == lookup.Map.end())
+					{
+						lookup.Map.emplace_back(page, pages.Pages[page]);
+					}
+				}
+			}
+
+			return lookup;
+		}
+
+		struct ViewportPass
+		{
+			SceneViewports::Program Program;
+			std::string Name;
+			R::GraphTexture Texture;
+			R::GraphTexture Depth;
+			R::GraphBuffer Draws;
+			std::vector<Region> Regions;
+			std::vector<Call> Calls;
+			PageLookup Pages;
+			bool Load = false;
+			std::uint32_t Width = 0;
+			std::uint32_t Height = 0;
+			S::DescriptorTable* Bindless = nullptr;
+		};
+
+		void DrawRegions(R::RenderCommandContext& c, const ViewportPass& pass)
+		{
+			const auto& program = pass.Program;
+			const auto& calls = pass.Calls;
+			S::TextureViewDesc colorView;
+			colorView.PixelFormat = ColorFormat;
+			std::array<S::RenderingAttachmentDesc, 1> colors{};
+			colors[0].View = &c.CreateView(pass.Texture, colorView);
+			colors[0].Load = pass.Load ? S::LoadOp::Load : S::LoadOp::Clear;
+			colors[0].Clear.Value = { 0.0f, 0.0f, 0.0f, 0.0f };
+			S::TextureViewDesc depthView;
+			depthView.PixelFormat = S::Format::D32Float;
+			const S::DepthStencilAttachmentDesc depthAttachment{ &c.CreateView(pass.Depth, depthView), S::LoadOp::Clear,
+				S::StoreOp::Discard, 0.0f, 0 };
+			auto& list = c.Commands();
+			list.BeginRendering({ colors, &depthAttachment, { pass.Width, pass.Height } });
+			list.BindGraphicsPipeline(*program.Pipeline);
+			list.BindDescriptorTable(BindlessSpace, *pass.Bindless);
+			std::uint32_t boundPage = ~0u, boundIndexPage = ~0u;
+			S::DescriptorTable* vertexTable = nullptr;
+
+			const auto bindVertices = [&](std::uint32_t page)
+			{
+				auto table = c.CreateDescriptorTable({ program.Layout, 0, 0, pass.Name });
+
+				if (!table)
+				{
+					throw std::runtime_error(pass.Name + " descriptor table could not be created");
+				}
+
+				const std::array<S::DescriptorWrite, 2> writes{ BufferWrite(c, DrawsBinding, pass.Draws),
+					BufferWrite(c, VerticesBinding, pass.Pages(page)) };
+				table->Write(writes);
+				vertexTable = &static_cast<S::DescriptorTable&>(c.Retain(std::move(table)));
+				list.BindDescriptorTable(0, *vertexTable);
+				boundPage = page;
 			};
+
+			bindVertices(calls.empty() ? ~0u : calls.front().VertexPage);
+			bool translucentBound = false;
+			// Binding a pipeline unbinds the descriptor tables: bind them again for the new one.
+			const auto bindPipeline = [&](S::GraphicsPipeline& pipeline)
+			{
+				list.BindGraphicsPipeline(pipeline);
+				list.BindDescriptorTable(BindlessSpace, *pass.Bindless);
+				list.BindDescriptorTable(0, *vertexTable);
+			};
+
+			for (const auto& region : pass.Regions)
+			{
+				if (translucentBound)
+				{
+					bindPipeline(*program.Pipeline);
+					translucentBound = false;
+				}
+
+				const auto& r = region.Rect;
+				list.SetViewport({ float(r[0]), float(r[1]), float(r[2]), float(r[3]), 0.0f, 1.0f });
+				list.SetScissor({ std::int32_t(r[0]), std::int32_t(r[1]), r[2], r[3] });
+				auto constants = region.Constants;
+				constants.Mode = 1;
+
+				list.PushConstants(S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
+				list.Draw(3);
+				constants.Mode = 0;
+				list.PushConstants(S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
+
+				for (std::size_t i = region.FirstCall; i < region.FirstCall + region.CallCount; ++i)
+				{
+					const auto& call = calls[i];
+
+					if (!translucentBound && i >= region.FirstCall + region.OpaqueCalls)
+					{
+						bindPipeline(*program.TranslucentPipeline);
+						list.PushConstants(
+							S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
+						translucentBound = true;
+					}
+
+					if (call.VertexPage != boundPage)
+					{
+						bindVertices(call.VertexPage);
+					}
+
+					if (call.IndexPage != boundIndexPage)
+					{
+						list.BindIndexBuffer(c.Get(pass.Pages(call.IndexPage)), 0, S::IndexType::Uint32);
+						boundIndexPage = call.IndexPage;
+					}
+
+					list.DrawIndexed(call.IndexCount, 1, call.FirstIndex, call.VertexOffset, call.Draw);
+				}
+			}
+
+			list.EndRendering();
+		}
+
+		// The viewport's pass: its draw buffer, a transient depth and the regions drawn into texture.
+		void AddViewportPass(R::RenderGraph& graph, const SceneViewports::Program& program, S::DescriptorTable& bindlessTable,
+			const SceneViewportDesc& desc, bool initialized, R::GraphTexture texture, const R::GeometryGraphResources& pages,
+			ViewportBatch batch)
+		{
+			// A dummy record keeps the draw buffer non-empty for clear-only scenes.
+			if (batch.Draws.empty())
+			{
+				batch.Draws.push_back({});
+			}
+
+			const auto name = desc.DebugName;
+			const auto drawBuffer = graph.CreateUpload(std::as_bytes(std::span(batch.Draws)), name + " draws", S::BufferUsage::Storage, 16);
+			S::TextureDesc depthDesc;
+			depthDesc.Extent = { desc.Width, desc.Height, 1 };
+			depthDesc.PixelFormat = S::Format::D32Float;
+			depthDesc.Usage = S::TextureUsage::DepthStencilAttachment;
+			depthDesc.DebugName = "Scene viewport depth";
+			const auto depth = graph.CreateTexture(depthDesc);
+			const bool whole = batch.Regions.front().Rect == std::array<std::uint32_t, 4>{ 0, 0, desc.Width, desc.Height };
+			const bool load = initialized && !whole;
+			auto lookup = CollectPages(batch.Calls, pages, drawBuffer);
+			std::vector<R::GraphBuffer> pageBuffers;
+
+			for (const auto& [index, buffer] : lookup.Map)
+			{
+				pageBuffers.push_back(buffer);
+			}
+
+			ViewportPass pass{ program, name, texture, depth, drawBuffer, std::move(batch.Regions), std::move(batch.Calls),
+				std::move(lookup), load, desc.Width, desc.Height, &bindlessTable };
 			graph.AddPass(
 				name, S::QueueType::Graphics,
 				[&](R::RenderGraphBuilder& b)
@@ -523,81 +723,75 @@ namespace Engine
 					{
 						b.Read(buffer, S::ResourceState::ShaderRead);
 					}
-
 				},
-				[program, name, texture, depth, drawBuffer, regions = std::move(regions), calls = std::move(calls), findPage, load, width,
-					height, bindlessTable = &bindlessTable](R::RenderCommandContext& c)
+				[pass = std::move(pass)](R::RenderCommandContext& c)
 				{
-					S::TextureViewDesc colorView;
-					colorView.PixelFormat = ColorFormat;
-					std::array<S::RenderingAttachmentDesc, 1> colors{};
-					colors[0].View = &c.CreateView(texture, colorView);
-					colors[0].Load = load ? S::LoadOp::Load : S::LoadOp::Clear;
-					colors[0].Clear.Value = { 0.0f, 0.0f, 0.0f, 0.0f };
-					S::TextureViewDesc depthView;
-					depthView.PixelFormat = S::Format::D32Float;
-					const S::DepthStencilAttachmentDesc depthAttachment{ &c.CreateView(depth, depthView), S::LoadOp::Clear,
-						S::StoreOp::Discard, 0.0f, 0 };
-					auto& list = c.Commands();
-					list.BeginRendering({ colors, &depthAttachment, { width, height } });
-					list.BindGraphicsPipeline(*program.Pipeline);
-					list.BindDescriptorTable(BindlessSpace, *bindlessTable);
-					std::uint32_t boundPage = ~0u, boundIndexPage = ~0u;
-
-					const auto bindVertices = [&](std::uint32_t page)
-					{
-						auto table = c.CreateDescriptorTable({ program.Layout, 0, 0, name });
-
-						if (!table)
-						{
-							throw std::runtime_error(name + " descriptor table could not be created");
-						}
-
-						const std::array<S::DescriptorWrite, 2> writes{ BufferWrite(c, DrawsBinding, drawBuffer),
-							BufferWrite(c, VerticesBinding, findPage(page)) };
-						table->Write(writes);
-						list.BindDescriptorTable(0, static_cast<S::DescriptorTable&>(c.Retain(std::move(table))));
-						boundPage = page;
-					};
-
-					bindVertices(calls.empty() ? ~0u : calls.front().VertexPage);
-
-					for (const auto& region : regions)
-					{
-						const auto& r = region.Rect;
-						list.SetViewport({ float(r[0]), float(r[1]), float(r[2]), float(r[3]), 0.0f, 1.0f });
-						list.SetScissor({ std::int32_t(r[0]), std::int32_t(r[1]), r[2], r[3] });
-						auto constants = region.Constants;
-						constants.Mode = 1;
-
-						list.PushConstants(
-							S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
-						list.Draw(3);
-						constants.Mode = 0;
-						list.PushConstants(
-							S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
-
-						for (std::size_t i = region.FirstCall; i < region.FirstCall + region.CallCount; ++i)
-						{
-							const auto& call = calls[i];
-
-							if (call.VertexPage != boundPage)
-							{
-								bindVertices(call.VertexPage);
-							}
-
-							if (call.IndexPage != boundIndexPage)
-							{
-								list.BindIndexBuffer(c.Get(findPage(call.IndexPage)), 0, S::IndexType::Uint32);
-								boundIndexPage = call.IndexPage;
-							}
-
-							list.DrawIndexed(call.IndexCount, 1, call.FirstIndex, call.VertexOffset, call.Draw);
-						}
-					}
-
-					list.EndRendering();
+					DrawRegions(c, pass);
 				});
+		}
+
+	} // namespace
+
+	std::vector<R::GraphTexture> SceneViewports::Record(R::RenderGraph& graph, const R::GeometryHeap& geometry,
+		const R::GeometryGraphResources& pages, const R::AssetResidencyService& residency, const Program& program,
+		S::DescriptorTable& bindlessTable, std::uint32_t materialLinear, std::uint32_t materialPoint)
+	{
+		std::vector<R::GraphTexture> textures;
+		lastItems = 0;
+
+		if (!program.Pipeline || !program.Layout)
+		{
+			return textures;
+		}
+
+		const SceneItemSource source{ geometry, pages, residency, resolver, materialLinear, materialPoint };
+		const auto resident = [&](const SceneViewportItem& item)
+		{
+			return source.Resident(item);
+		};
+
+		for (auto& slot : viewports)
+		{
+			auto& viewport = *slot;
+			viewport.Recorded = 0;
+			viewport.Written = false;
+
+			if (!viewport.Texture)
+			{
+				continue;
+			}
+
+			const auto texture =
+				graph.ImportTexture(*viewport.Texture, viewport.Initialized ? S::ResourceState::ShaderRead : S::ResourceState::Undefined);
+			graph.Export(texture, S::ResourceState::ShaderRead);
+			textures.push_back(texture);
+			// Scenes are drawn in order up to the first one still waiting for residency.
+			ViewportBatch batch;
+
+			for (const auto& scene : viewport.Queue)
+			{
+				if (!std::all_of(scene.Items.begin(), scene.Items.end(), resident))
+				{
+					break;
+				}
+
+				lastItems += AddScene(batch, scene, source, program.TranslucentPipeline != nullptr);
+				++viewport.Recorded;
+			}
+
+			if (batch.Regions.empty())
+			{
+				if (viewport.Initialized)
+				{
+					continue;
+				}
+
+				// Never drawn: clear it so the UI samples transparent black, not undefined texels.
+				batch.Regions.push_back({ { 0, 0, viewport.Desc.Width, viewport.Desc.Height }, {}, 0, 0, 0 });
+			}
+
+			viewport.Written = true;
+			AddViewportPass(graph, program, bindlessTable, viewport.Desc, viewport.Initialized, texture, pages, std::move(batch));
 		}
 
 		return textures;
@@ -615,6 +809,19 @@ namespace Engine
 		}
 	}
 
+	void SceneViewports::RetireAfter(const S::TimelinePoint& completion)
+	{
+		for (auto& entry : retired)
+		{
+			if (entry->Pending)
+			{
+				entry->LastUse = completion;
+				entry->Pending = false;
+				bindless.Release(entry->Handle, completion);
+			}
+		}
+	}
+
 	void SceneViewports::AbortFrame()
 	{
 		for (auto& viewport : viewports)
@@ -629,7 +836,8 @@ namespace Engine
 		std::erase_if(retired,
 			[](const std::unique_ptr<Retired>& entry)
 			{
-				return !entry->LastUse.Semaphore || entry->LastUse.Semaphore->GetCompletedValue() >= entry->LastUse.Value;
+				return !entry->Pending &&
+					(!entry->LastUse.Semaphore || entry->LastUse.Semaphore->GetCompletedValue() >= entry->LastUse.Value);
 			});
 	}
 
@@ -637,7 +845,13 @@ namespace Engine
 	{
 		for (const auto& entry : retired)
 		{
-			if (entry->LastUse.Semaphore)
+			if (entry->Pending)
+			{
+				// Draining follows a device idle: nothing in flight uses it any more.
+				entry->Pending = false;
+				bindless.Release(entry->Handle);
+			}
+			else if (entry->LastUse.Semaphore)
 			{
 				entry->LastUse.Semaphore->Wait(entry->LastUse.Value);
 			}

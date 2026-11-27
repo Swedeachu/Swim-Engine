@@ -110,12 +110,13 @@ namespace Swim::Input
 			Platform::InputDeviceId gamepadDevice = 0) const;
 
 	private:
+	  void ProcessKeyEvent(const Platform::InputEvent& event);
 
-		struct ButtonState
-		{
-			bool Current = false;
-			bool Previous = false;
-			bool Deferred = false;
+	  struct ButtonState
+	  {
+		  bool Current = false;
+		  bool Previous = false;
+		  bool Deferred = false;
 		};
 
 		struct GamepadState

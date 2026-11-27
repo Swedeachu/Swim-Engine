@@ -4,6 +4,8 @@
 //  - BoxFieldDepth (BOX_DEPTH_ONLY=1): the depth prepass, the same vertex stage;
 //  - BoxFieldShadow (BOX_SHADOW=1): shadow tiles (ShadowFrame.slang).
 
+#include "Resources/DrawIndex.slang"
+
 #ifndef BOX_DEPTH_ONLY
 #define BOX_DEPTH_ONLY 0
 #endif
@@ -61,8 +63,10 @@ struct ShadowConstants
 [[vk::push_constant]] ConstantBuffer<ShadowConstants> Constants;
 
 [shader("vertex")]
-float4 vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID) : SV_Position
+float4 vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS) : SV_Position
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	const Box box = Boxes[boxIndex];
 	float3 corner;
 	float3 normal;
@@ -90,8 +94,10 @@ struct VertexOutput
 #if BOX_DEPTH_ONLY
 // The opaque variant's position, computed the same way (bit-identical depth).
 [shader("vertex")]
-float4 vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID) : SV_Position
+float4 vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS) : SV_Position
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	const Box box = Boxes[boxIndex];
 	float3 corner;
 	float3 normal;
@@ -107,8 +113,10 @@ void fragmentMain()
 }
 #else
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	const Box box = Boxes[boxIndex];
 	float3 corner;
 	float3 normal;

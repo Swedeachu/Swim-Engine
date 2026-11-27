@@ -71,9 +71,12 @@ namespace Swim::Render
 
 			const bool overlay = (instance.Flags & static_cast<std::uint32_t>(RenderObjectFlags::Overlay)) != 0;
 			const bool overlayView = (inputs.View.Flags & std::uint32_t(GpuViewFlags::Overlay)) != 0;
+			const bool isStatic = (instance.Flags & static_cast<std::uint32_t>(RenderObjectFlags::Static)) != 0;
+			const bool wrongLayer =
+				(inputs.View.Flags & std::uint32_t(isStatic ? GpuViewFlags::DynamicCasters : GpuViewFlags::StaticCasters)) != 0;
 
 			if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= inputs.Meshes.size() ||
-				(excluded != 0u && instance.ObjectId + 1u == excluded) || (overlay && !overlayView))
+				(excluded != 0u && instance.ObjectId + 1u == excluded) || (overlay && !overlayView) || wrongLayer)
 			{
 				++stats.NotDrawable;
 

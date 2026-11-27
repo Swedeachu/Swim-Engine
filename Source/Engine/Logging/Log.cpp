@@ -5,7 +5,11 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
@@ -134,6 +138,25 @@ namespace Engine::Logging
 		bool cerrWasUnitBuffered = false;
 		bool initialized = false;
 
+		std::atomic<int>& DebugLevelValue() noexcept
+		{
+			static std::atomic<int> value = []
+			{
+				const char* text = std::getenv("SWIM_DEBUG_LOG_LEVEL");
+				return text ? std::max(0, std::atoi(text)) : 0;
+			}();
+			return value;
+		}
+
+		spdlog::level::level_enum BaseLevel()
+		{
+#if defined(_SWIM_DEBUG)
+			return spdlog::level::debug;
+#else
+			return DebugLevelValue().load(std::memory_order_relaxed) > 0 ? spdlog::level::debug : spdlog::level::info;
+#endif
+		}
+
 		std::filesystem::path ResolveExecutableDirectory()
 		{
 #if defined(_WIN32)
@@ -237,11 +260,7 @@ namespace Engine::Logging
 			}
 
 			logger = std::make_shared<spdlog::logger>("swim_engine", sinks.begin(), sinks.end());
-#if defined(_SWIM_DEBUG)
-			logger->set_level(spdlog::level::debug);
-#else
-			logger->set_level(spdlog::level::info);
-#endif
+			logger->set_level(BaseLevel());
 			logger->flush_on(spdlog::level::info);
 			spdlog::set_default_logger(logger);
 
@@ -289,6 +308,49 @@ namespace Engine::Logging
 			logger.reset();
 			std::cerr << "[Logging] Failed to initialize spdlog: " << error.what() << '\n';
 			return false;
+		}
+	}
+
+	void SetDebugLevel(int level) noexcept
+	{
+		DebugLevelValue().store(std::max(0, level), std::memory_order_relaxed);
+		std::lock_guard<std::mutex> lock(stateMutex);
+
+		if (logger)
+		{
+			logger->set_level(BaseLevel());
+		}
+	}
+
+	int GetDebugLevel() noexcept
+	{
+		return DebugLevelValue().load(std::memory_order_relaxed);
+	}
+
+	void Write(Level level, std::string_view text) noexcept
+	{
+		try
+		{
+			std::lock_guard<std::mutex> lock(stateMutex);
+
+			if (logger)
+			{
+				const auto native = level == Level::Error ? spdlog::level::err
+					: level == Level::Warning			  ? spdlog::level::warn
+					: level == Level::Info				  ? spdlog::level::info
+														  : spdlog::level::debug;
+				logger->log(native, text);
+				return;
+			}
+		}
+		catch (...)
+		{
+			return;
+		}
+
+		if (level == Level::Error || level == Level::Warning)
+		{
+			std::fprintf(stderr, "%.*s\n", static_cast<int>(text.size()), text.data());
 		}
 	}
 

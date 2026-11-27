@@ -6,6 +6,7 @@ include_guard(GLOBAL)
 #
 #   ${SWIM_ENGINE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.spv
 #   ${SWIM_ENGINE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.reflection.json
+#   ${SWIM_ENGINE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.dxil[.reflection.json] (Direct3D 12)
 #
 # swim_configure_shaders(<executable>) deploys the directory as <exe dir>/Shaders/Runtime
 # (ShaderLibrary's default root) for the sandbox and for any project embedding the
@@ -54,18 +55,30 @@ function(swim_define_runtime_shader_set)
 		if(NOT DEFINED ${SWIM_PROGRAM}_SPIRV OR NOT DEFINED ${SWIM_PROGRAM}_REFLECTION)
 			message(FATAL_ERROR "Runtime shader ${SWIM_RUNTIME_NAME}: program ${SWIM_PROGRAM} is not defined")
 		endif()
-		set(SWIM_SPV "${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.spv")
-		set(SWIM_JSON "${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.reflection.json")
+		set(SWIM_STAGED
+			"${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.spv"
+			"${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.reflection.json")
+		set(SWIM_STAGED_SOURCES "${${SWIM_PROGRAM}_SPIRV}" "${${SWIM_PROGRAM}_REFLECTION}")
+		# DXIL beside SPIR-V when the Direct3D 12 backend is built (<Name>.dxil + reflection).
+		if(DEFINED ${SWIM_PROGRAM}_DXIL)
+			list(APPEND SWIM_STAGED
+				"${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.dxil"
+				"${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.dxil.reflection.json")
+			list(APPEND SWIM_STAGED_SOURCES "${${SWIM_PROGRAM}_DXIL}" "${${SWIM_PROGRAM}_DXIL_REFLECTION}")
+		endif()
+		set(SWIM_COPIES "")
+		foreach(SWIM_SOURCE SWIM_DESTINATION IN ZIP_LISTS SWIM_STAGED_SOURCES SWIM_STAGED)
+			list(APPEND SWIM_COPIES COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SWIM_SOURCE}" "${SWIM_DESTINATION}")
+		endforeach()
 		add_custom_command(
-			OUTPUT "${SWIM_SPV}" "${SWIM_JSON}"
+			OUTPUT ${SWIM_STAGED}
 			COMMAND "${CMAKE_COMMAND}" -E make_directory "${SWIM_RUNTIME_SHADER_ROOT}"
-			COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${SWIM_PROGRAM}_SPIRV}" "${SWIM_SPV}"
-			COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${SWIM_PROGRAM}_REFLECTION}" "${SWIM_JSON}"
-			DEPENDS "${${SWIM_PROGRAM}_SPIRV}" "${${SWIM_PROGRAM}_REFLECTION}"
+			${SWIM_COPIES}
+			DEPENDS ${SWIM_STAGED_SOURCES}
 			COMMENT "Staging runtime shader ${SWIM_RUNTIME_NAME}"
 			VERBATIM
 		)
-		list(APPEND SWIM_RUNTIME_SHADER_OUTPUTS "${SWIM_SPV}" "${SWIM_JSON}")
+		list(APPEND SWIM_RUNTIME_SHADER_OUTPUTS ${SWIM_STAGED})
 	endforeach()
 
 	add_custom_target(SwimRuntimeShaders DEPENDS ${SWIM_RUNTIME_SHADER_OUTPUTS})

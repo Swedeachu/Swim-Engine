@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 // The UI smoke needs the SwimUiQuad artifacts and the text/UI module (compiled into
@@ -91,7 +92,7 @@ namespace
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", bytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytes } } };
 		UiProgram program;
-		program.Program = device.CreateShaderProgram({ stages, { draw.DescriptorSchemas, draw.PushConstants }, "UI quads" });
+		program.Program = device.CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(draw), "UI quads" });
 		SWIM_REQUIRE(program.Program);
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), "UI quads", { &bindlessSpace, 1 } });
 		SWIM_REQUIRE(program.Layout);
@@ -326,9 +327,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "UI smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(
 			graphics->GetAdapter(0).GetInfo().Capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
@@ -736,9 +735,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "UI smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(
 			graphics->GetAdapter(0).GetInfo().Capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
@@ -1210,16 +1207,8 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "UiRendererMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunUiSmoke);
-				} });
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "UiWorldCanvasesMatchTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunUiWorldSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunUiSmoke>("UiRendererMatchesTheCpuReference", SWIM_TEST_LOCATION);
+			Swim::Testing::AddSmoke<&RunUiWorldSmoke>("UiWorldCanvasesMatchTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

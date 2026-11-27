@@ -81,7 +81,7 @@ namespace Swim::RhiVulkan
 		return a.Binding == b.Binding && a.Type == b.Type && a.Count == b.Count && a.Stages == b.Stages &&
 			a.VariableCount == b.VariableCount && a.PartiallyBound == b.PartiallyBound &&
 			a.StorageTextureFormat == b.StorageTextureFormat && a.SampledClass == b.SampledClass &&
-			a.SampledDimension == b.SampledDimension && a.UpdateAfterBind == b.UpdateAfterBind;
+			a.SampledDimension == b.SampledDimension && a.UpdateAfterBind == b.UpdateAfterBind && a.Multisampled == b.Multisampled;
 	}
 
 	bool AreDescriptorSpacesCompatible(const VulkanPipelineLayoutState& a, const VulkanPipelineLayoutState& b, std::uint32_t space)
@@ -141,7 +141,7 @@ namespace Swim::RhiVulkan
 							});
 
 						if (found == space.Bindings.end() || found->Type != binding.Type || found->SampledClass != binding.SampledClass ||
-							found->SampledDimension != binding.SampledDimension ||
+							found->SampledDimension != binding.SampledDimension || found->Multisampled != binding.Multisampled ||
 							found->StorageTextureFormat != binding.StorageTextureFormat ||
 							(static_cast<std::uint32_t>(found->Stages) & static_cast<std::uint32_t>(binding.Stages)) !=
 								static_cast<std::uint32_t>(binding.Stages) ||
@@ -162,13 +162,208 @@ namespace Swim::RhiVulkan
 			return true;
 		}
 
+		// A binding the Vulkan backend can represent in this layout (explicit, shared spaces
+		// may be visible to stages the program lacks).
+		bool IsValidBinding(
+			const VulkanPipelineLayoutState& layout, const Rhi::DescriptorSchemaDesc& schema, std::size_t bindingIndex, bool explicitSpace)
+		{
+			const auto& device = *layout.Device;
+			const auto& binding = schema.Bindings[bindingIndex];
+			const bool bindlessType = binding.Type == Rhi::DescriptorType::Sampler || binding.Type == Rhi::DescriptorType::SampledTexture;
+			// Count 0 is a runtime-sized reflected array that no explicit space sized.
+			if (binding.Count == 0 || binding.VariableCount ||
+				(bindingIndex > 0 && binding.Binding == schema.Bindings[bindingIndex - 1].Binding) ||
+				((binding.PartiallyBound || binding.UpdateAfterBind) && !bindlessType) ||
+				(binding.UpdateAfterBind && (!binding.PartiallyBound || !device.BindlessDescriptorsEnabled)))
+			{
+				return false;
+			}
+
+			if (binding.Multisampled &&
+				(binding.Type != Rhi::DescriptorType::SampledTexture || binding.SampledDimension != Rhi::TextureViewDimension::Texture2D ||
+					binding.PartiallyBound || binding.UpdateAfterBind))
+			{
+				return false;
+			}
+
+			if (binding.Type == Rhi::DescriptorType::SampledTexture
+					? (!Rhi::IsSampledTextureDimension(binding.SampledDimension) ||
+						  (binding.SampledDimension == Rhi::TextureViewDimension::TextureCubeArray &&
+							  !device.Device.physical_device.features.imageCubeArray))
+					: binding.SampledDimension != Rhi::TextureViewDimension::Texture2D)
+			{
+				return false;
+			}
+
+			ToVkDescriptorType(binding.Type);
+			ToVkDescriptorStages(binding.Stages);
+			return !(
+				(!explicitSpace && (static_cast<std::uint32_t>(binding.Stages) & ~static_cast<std::uint32_t>(layout.ProgramStages)) != 0) ||
+				((binding.Type == Rhi::DescriptorType::StorageBuffer || binding.Type == Rhi::DescriptorType::StorageTexture) &&
+					binding.Stages != Rhi::ShaderStageMask::Compute) ||
+				(binding.Type == Rhi::DescriptorType::StorageTexture ? !Rhi::IsStorageTextureFormat(binding.StorageTextureFormat)
+																	 : binding.StorageTextureFormat != Rhi::Format::Undefined) ||
+				(binding.Type == Rhi::DescriptorType::SampledTexture ? (binding.SampledClass != Rhi::SampledTextureClass::Float &&
+																		   binding.SampledClass != Rhi::SampledTextureClass::Uint &&
+																		   binding.SampledClass != Rhi::SampledTextureClass::Sint)
+																	 : binding.SampledClass != Rhi::SampledTextureClass::Float));
+		}
+
+		// Descriptor counts per limit slot, in total and per stage (vertex, fragment, compute).
+		struct DescriptorUsage
+		{
+			Counts Totals{};
+			std::array<Counts, 3> Stages{};
+
+			void Add(const Rhi::DescriptorBindingDesc& binding)
+			{
+				const std::size_t slot = GetLimitSlot(ToVkDescriptorType(binding.Type));
+				Totals[slot] += binding.Count;
+
+				for (std::size_t stage = 0; stage < Stages.size(); ++stage)
+				{
+					if ((static_cast<std::uint32_t>(binding.Stages) & (1u << stage)) != 0)
+					{
+						Stages[stage][slot] += binding.Count;
+					}
+				}
+			}
+
+			bool Within(const Counts& totalLimit, const Counts& stageLimit, std::uint64_t stageResources) const
+			{
+				for (std::size_t slot = 0; slot < Totals.size(); ++slot)
+				{
+					if (Totals[slot] > totalLimit[slot])
+					{
+						return false;
+					}
+				}
+
+				for (const auto& counts : Stages)
+				{
+					for (std::size_t slot = 0; slot < counts.size(); ++slot)
+					{
+						if (counts[slot] > stageLimit[slot])
+						{
+							return false;
+						}
+					}
+
+					if (counts[1] + counts[2] + counts[3] + counts[4] > stageResources)
+					{
+						return false;
+					}
+				}
+
+				return true;
+			}
+		};
+
+		// Plain limits count sets without update-after-bind bindings; the update-after-bind
+		// limits count every set once any such set exists.
+		bool WithinDeviceLimits(
+			const VulkanDeviceState& device, const DescriptorUsage& plain, const DescriptorUsage& all, bool anyUpdateAfterBind)
+		{
+			const auto& limits = device.Device.physical_device.properties.limits;
+			const auto& indexing = device.DescriptorIndexing;
+			const Counts totalLimits{ limits.maxDescriptorSetSamplers, limits.maxDescriptorSetSampledImages,
+				limits.maxDescriptorSetUniformBuffers, limits.maxDescriptorSetStorageBuffers, limits.maxDescriptorSetStorageImages };
+			const Counts stageLimits{ limits.maxPerStageDescriptorSamplers, limits.maxPerStageDescriptorSampledImages,
+				limits.maxPerStageDescriptorUniformBuffers, limits.maxPerStageDescriptorStorageBuffers,
+				limits.maxPerStageDescriptorStorageImages };
+			const Counts bindTotalLimits{ indexing.maxDescriptorSetUpdateAfterBindSamplers,
+				indexing.maxDescriptorSetUpdateAfterBindSampledImages, indexing.maxDescriptorSetUpdateAfterBindUniformBuffers,
+				indexing.maxDescriptorSetUpdateAfterBindStorageBuffers, indexing.maxDescriptorSetUpdateAfterBindStorageImages };
+			const Counts bindStageLimits{ indexing.maxPerStageDescriptorUpdateAfterBindSamplers,
+				indexing.maxPerStageDescriptorUpdateAfterBindSampledImages, indexing.maxPerStageDescriptorUpdateAfterBindUniformBuffers,
+				indexing.maxPerStageDescriptorUpdateAfterBindStorageBuffers, indexing.maxPerStageDescriptorUpdateAfterBindStorageImages };
+			return plain.Within(totalLimits, stageLimits, limits.maxPerStageResources) &&
+				(!anyUpdateAfterBind || all.Within(bindTotalLimits, bindStageLimits, indexing.maxPerStageUpdateAfterBindResources));
+		}
+
+		// The set layout of one space (empty when the program declares nothing there).
+		bool CreateSetLayout(VulkanPipelineLayoutState& layout, std::uint32_t space)
+		{
+			auto& device = *layout.Device;
+			std::vector<VkDescriptorSetLayoutBinding> bindings;
+			std::vector<VkDescriptorBindingFlags> flags;
+			bool updateAfterBind = false;
+
+			if (const auto* schema = FindDescriptorSchema(layout, space))
+			{
+				for (const auto& binding : schema->Bindings)
+				{
+					bindings.push_back({ binding.Binding, ToVkDescriptorType(binding.Type), binding.Count,
+						ToVkDescriptorStages(binding.Stages), nullptr });
+					VkDescriptorBindingFlags bindingFlags = 0;
+
+					if (binding.PartiallyBound)
+					{
+						bindingFlags |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+					}
+
+					if (binding.UpdateAfterBind)
+					{
+						bindingFlags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+						updateAfterBind = true;
+					}
+
+					flags.push_back(bindingFlags);
+				}
+			}
+
+			VkDescriptorSetLayoutBindingFlagsCreateInfo flagInfo{};
+			flagInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+			flagInfo.bindingCount = static_cast<std::uint32_t>(flags.size());
+			flagInfo.pBindingFlags = flags.data();
+			VkDescriptorSetLayoutCreateInfo info{};
+			info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			info.bindingCount = static_cast<std::uint32_t>(bindings.size());
+			info.pBindings = bindings.data();
+			// Only chain binding flags when some are set, keeping plain layouts unchanged.
+			if (std::any_of(flags.begin(), flags.end(),
+					[](auto value)
+					{
+						return value != 0;
+					}))
+			{
+				info.pNext = &flagInfo;
+			}
+
+			if (updateAfterBind)
+			{
+				info.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+			}
+
+			layout.UpdateAfterBindSets[space] = updateAfterBind;
+			VkDescriptorSetLayoutSupport support{};
+			support.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT;
+			device.Dispatch.vkGetDescriptorSetLayoutSupport(device.Device.device, &info, &support);
+
+			if (!support.supported)
+			{
+				return false;
+			}
+
+			const auto createResult =
+				device.Dispatch.vkCreateDescriptorSetLayout(device.Device.device, &info, nullptr, &layout.Sets[space]);
+
+			if (createResult != VK_SUCCESS)
+			{
+				layout.Sets[space] = VK_NULL_HANDLE;
+				CheckVulkanResult(device, createResult, "vkCreateDescriptorSetLayout");
+				return false;
+			}
+
+			return true;
+		}
+
 	} // namespace
 
 	bool CreateDescriptorLayouts(VulkanPipelineLayoutState& layout, std::span<const Rhi::DescriptorSchemaDesc> explicitSpaces)
 	{
 		auto& device = *layout.Device;
 		const auto& limits = device.Device.physical_device.properties.limits;
-		const auto& indexing = device.DescriptorIndexing;
 		auto& schemas = layout.Interface.DescriptorSchemas;
 		std::vector<std::uint32_t> explicitIds;
 
@@ -182,24 +377,9 @@ namespace Swim::RhiVulkan
 			{
 				return a.Space < b.Space;
 			});
-		// Plain limits count sets without update-after-bind bindings; the
-		// update-after-bind limits count every set once any such set exists.
-		Counts plainTotals{};
-		Counts allTotals{};
-		std::array<Counts, 3> plainStage{};
-		std::array<Counts, 3> allStage{};
+		DescriptorUsage plain;
+		DescriptorUsage all;
 		bool anyUpdateAfterBind = false;
-		const Counts totalLimits{ limits.maxDescriptorSetSamplers, limits.maxDescriptorSetSampledImages,
-			limits.maxDescriptorSetUniformBuffers, limits.maxDescriptorSetStorageBuffers, limits.maxDescriptorSetStorageImages };
-		const Counts stageLimits{ limits.maxPerStageDescriptorSamplers, limits.maxPerStageDescriptorSampledImages,
-			limits.maxPerStageDescriptorUniformBuffers, limits.maxPerStageDescriptorStorageBuffers,
-			limits.maxPerStageDescriptorStorageImages };
-		const Counts bindTotalLimits{ indexing.maxDescriptorSetUpdateAfterBindSamplers,
-			indexing.maxDescriptorSetUpdateAfterBindSampledImages, indexing.maxDescriptorSetUpdateAfterBindUniformBuffers,
-			indexing.maxDescriptorSetUpdateAfterBindStorageBuffers, indexing.maxDescriptorSetUpdateAfterBindStorageImages };
-		const Counts bindStageLimits{ indexing.maxPerStageDescriptorUpdateAfterBindSamplers,
-			indexing.maxPerStageDescriptorUpdateAfterBindSampledImages, indexing.maxPerStageDescriptorUpdateAfterBindUniformBuffers,
-			indexing.maxPerStageDescriptorUpdateAfterBindStorageBuffers, indexing.maxPerStageDescriptorUpdateAfterBindStorageImages };
 
 		try
 		{
@@ -227,100 +407,21 @@ namespace Swim::RhiVulkan
 
 				for (std::size_t bindingIndex = 0; bindingIndex < schema.Bindings.size(); ++bindingIndex)
 				{
-					const auto& binding = schema.Bindings[bindingIndex];
-					const bool bindlessType =
-						binding.Type == Rhi::DescriptorType::Sampler || binding.Type == Rhi::DescriptorType::SampledTexture;
-					// Count 0 is a runtime-sized reflected array that no explicit space sized.
-					if (binding.Count == 0 || binding.VariableCount ||
-						(bindingIndex > 0 && binding.Binding == schema.Bindings[bindingIndex - 1].Binding) ||
-						((binding.PartiallyBound || binding.UpdateAfterBind) && !bindlessType) ||
-						(binding.UpdateAfterBind && (!binding.PartiallyBound || !device.BindlessDescriptorsEnabled)))
+					if (!IsValidBinding(layout, schema, bindingIndex, explicitSpace))
 					{
 						return false;
 					}
-
-					if (binding.Type == Rhi::DescriptorType::SampledTexture
-							? (!Rhi::IsSampledTextureDimension(binding.SampledDimension) ||
-								  (binding.SampledDimension == Rhi::TextureViewDimension::TextureCubeArray &&
-									  !device.Device.physical_device.features.imageCubeArray))
-							: binding.SampledDimension != Rhi::TextureViewDimension::Texture2D)
-					{
-						return false;
-					}
-
-					const auto type = ToVkDescriptorType(binding.Type);
-					ToVkDescriptorStages(binding.Stages);
-					// Explicit (shared) spaces may be visible to stages this program lacks.
-					if ((!explicitSpace &&
-							(static_cast<std::uint32_t>(binding.Stages) & ~static_cast<std::uint32_t>(layout.ProgramStages)) != 0) ||
-						((binding.Type == Rhi::DescriptorType::StorageBuffer || binding.Type == Rhi::DescriptorType::StorageTexture) &&
-							binding.Stages != Rhi::ShaderStageMask::Compute) ||
-						(binding.Type == Rhi::DescriptorType::StorageTexture ? !Rhi::IsStorageTextureFormat(binding.StorageTextureFormat)
-																			 : binding.StorageTextureFormat != Rhi::Format::Undefined) ||
-						(binding.Type == Rhi::DescriptorType::SampledTexture ? (binding.SampledClass != Rhi::SampledTextureClass::Float &&
-																				   binding.SampledClass != Rhi::SampledTextureClass::Uint &&
-																				   binding.SampledClass != Rhi::SampledTextureClass::Sint)
-																			 : binding.SampledClass != Rhi::SampledTextureClass::Float))
-					{
-						return false;
-					}
-
-					const std::size_t slot = GetLimitSlot(type);
-					const auto accumulate = [&](Counts& totals, std::array<Counts, 3>& perStage)
-					{
-						totals[slot] += binding.Count;
-
-						for (std::size_t stage = 0; stage < perStage.size(); ++stage)
-						{
-							if ((static_cast<std::uint32_t>(binding.Stages) & (1u << stage)) != 0)
-							{
-								perStage[stage][slot] += binding.Count;
-							}
-						}
-					};
 
 					if (!setUpdateAfterBind)
 					{
-						accumulate(plainTotals, plainStage);
+						plain.Add(schema.Bindings[bindingIndex]);
 					}
 
-					accumulate(allTotals, allStage);
+					all.Add(schema.Bindings[bindingIndex]);
 				}
 			}
 
-			const auto withinLimits = [](const Counts& totals, const std::array<Counts, 3>& perStage, const Counts& totalLimit,
-										  const Counts& stageLimit, std::uint64_t stageResources)
-			{
-				for (std::size_t slot = 0; slot < totals.size(); ++slot)
-				{
-					if (totals[slot] > totalLimit[slot])
-					{
-						return false;
-					}
-				}
-
-				for (const auto& counts : perStage)
-				{
-					for (std::size_t slot = 0; slot < counts.size(); ++slot)
-					{
-						if (counts[slot] > stageLimit[slot])
-						{
-							return false;
-						}
-					}
-
-					if (counts[1] + counts[2] + counts[3] + counts[4] > stageResources)
-					{
-						return false;
-					}
-				}
-
-				return true;
-			};
-
-			if (!withinLimits(plainTotals, plainStage, totalLimits, stageLimits, limits.maxPerStageResources) ||
-				(anyUpdateAfterBind &&
-					!withinLimits(allTotals, allStage, bindTotalLimits, bindStageLimits, indexing.maxPerStageUpdateAfterBindResources)))
+			if (!WithinDeviceLimits(device, plain, all, anyUpdateAfterBind))
 			{
 				return false;
 			}
@@ -335,74 +436,8 @@ namespace Swim::RhiVulkan
 
 			for (std::uint32_t space = 0; space < layout.Sets.size(); ++space)
 			{
-				std::vector<VkDescriptorSetLayoutBinding> bindings;
-				std::vector<VkDescriptorBindingFlags> flags;
-				bool updateAfterBind = false;
-
-				if (const auto* schema = FindDescriptorSchema(layout, space))
+				if (!CreateSetLayout(layout, space))
 				{
-					for (const auto& binding : schema->Bindings)
-					{
-						bindings.push_back({ binding.Binding, ToVkDescriptorType(binding.Type), binding.Count,
-							ToVkDescriptorStages(binding.Stages), nullptr });
-						VkDescriptorBindingFlags bindingFlags = 0;
-
-						if (binding.PartiallyBound)
-						{
-							bindingFlags |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
-						}
-
-						if (binding.UpdateAfterBind)
-						{
-							bindingFlags |=
-								VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-							updateAfterBind = true;
-						}
-
-						flags.push_back(bindingFlags);
-					}
-				}
-
-				VkDescriptorSetLayoutBindingFlagsCreateInfo flagInfo{};
-				flagInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-				flagInfo.bindingCount = static_cast<std::uint32_t>(flags.size());
-				flagInfo.pBindingFlags = flags.data();
-				VkDescriptorSetLayoutCreateInfo info{};
-				info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-				info.bindingCount = static_cast<std::uint32_t>(bindings.size());
-				info.pBindings = bindings.data();
-				// Only chain binding flags when some are set, keeping plain layouts unchanged.
-				if (std::any_of(flags.begin(), flags.end(),
-						[](auto value)
-						{
-							return value != 0;
-						}))
-				{
-					info.pNext = &flagInfo;
-				}
-
-				if (updateAfterBind)
-				{
-					info.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-				}
-
-				layout.UpdateAfterBindSets[space] = updateAfterBind;
-				VkDescriptorSetLayoutSupport support{};
-				support.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT;
-				device.Dispatch.vkGetDescriptorSetLayoutSupport(device.Device.device, &info, &support);
-
-				if (!support.supported)
-				{
-					return false;
-				}
-
-				const auto createResult =
-					device.Dispatch.vkCreateDescriptorSetLayout(device.Device.device, &info, nullptr, &layout.Sets[space]);
-
-				if (createResult != VK_SUCCESS)
-				{
-					layout.Sets[space] = VK_NULL_HANDLE;
-					CheckVulkanResult(device, createResult, "vkCreateDescriptorSetLayout");
 					return false;
 				}
 			}

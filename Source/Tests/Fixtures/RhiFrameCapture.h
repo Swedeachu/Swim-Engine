@@ -321,7 +321,12 @@ namespace Swim::Testing
 		// before recording, so recorded order equals GPU order for these tests.
 		void CopyBuffer(Swim::Rhi::Buffer& source, Swim::Rhi::Buffer& destination, const Swim::Rhi::BufferCopyRegion& region) override;
 
-		void CopyTexture(Swim::Rhi::Texture&, Swim::Rhi::Texture&, const Swim::Rhi::TextureCopyRegion&) override {}
+		// Recorded only (no texels move): SourceOffset/DestinationOffset = the regions' X, Size = width.
+		void CopyTexture(Swim::Rhi::Texture& source, Swim::Rhi::Texture& destination, const Swim::Rhi::TextureCopyRegion& region) override
+		{
+			Capture({ "CopyTexture", &source, &destination, std::uint64_t(region.SourceOffset.X), std::uint64_t(region.DestinationOffset.X),
+				region.Extent.Width });
+		}
 
 		void CopyBufferToTexture(Swim::Rhi::Buffer& source, Swim::Rhi::Texture& destination, const Swim::Rhi::BufferTextureCopyRegion& region) override;
 

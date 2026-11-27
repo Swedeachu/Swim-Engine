@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Residency/TextureResidency.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include <algorithm>
 #include <cstdlib>
@@ -34,9 +35,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE(platform.Initialize());
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -140,9 +139,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE(platform.Initialize());
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -229,9 +226,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE(platform.Initialize());
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -310,11 +305,7 @@ namespace
 
 		if (enabled && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TextureResidencyMipChainUploadAndRetirement", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunTextureResidencySmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunTextureResidencySmoke>("TextureResidencyMipChainUploadAndRetirement", SWIM_TEST_LOCATION);
 		}
 
 		return true;
@@ -326,11 +317,7 @@ namespace
 
 		if (enabled && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GeometryHeapPagedUploadAndRetirement", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunGeometryHeapSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunGeometryHeapSmoke>("GeometryHeapPagedUploadAndRetirement", SWIM_TEST_LOCATION);
 		}
 
 		return true;
@@ -342,11 +329,7 @@ namespace
 
 		if (enabled && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "RenderGraphStagedTransfersAndReadback", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunGraphTransferSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunGraphTransferSmoke>("RenderGraphStagedTransfersAndReadback", SWIM_TEST_LOCATION);
 		}
 
 		return true;

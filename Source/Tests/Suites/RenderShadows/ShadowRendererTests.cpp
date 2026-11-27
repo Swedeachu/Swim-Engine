@@ -413,6 +413,87 @@ SWIM_TEST("Render.ShadowRenderer", "APersistentAtlasRedrawsOnlyTheFlaggedTilesAf
 	SWIM_CHECK(viewports[0].SourceOffset == world.plan.Draws[0].Tile.X && viewports[0].Size == world.plan.Draws[0].Tile.Size);
 }
 
+SWIM_TEST("Render.ShadowRenderer", "AStaticLayerRedrawsFlaggedStaticTilesThenCopiesThemUnderTheDynamicCasters")
+{
+	ShadowWorld world;
+	Testing::MockPipelineLayout clearLayout;
+	MockGraphicsPipeline clearPipeline;
+	auto desc = world.Desc();
+	desc.Clear = { &clearPipeline, &clearLayout };
+	const ShadowRenderer renderer(desc);
+	world.Plan({ Caster(LightType::Spot, 4), Caster(LightType::Point, 1) });
+	SWIM_REQUIRE_EQUAL(world.plan.Views.size(), std::size_t(7));
+
+	Rhi::TextureDesc atlasDesc;
+	atlasDesc.Extent = { 2048, 2048, 1 };
+	atlasDesc.PixelFormat = Rhi::Format::D32Float;
+	atlasDesc.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferSource |
+		Rhi::TextureUsage::TransferDestination;
+	auto atlas = world.fixture.device.CreateTexture(atlasDesc);
+	auto staticAtlas = world.fixture.device.CreateTexture(atlasDesc);
+	RenderGraph graph;
+	auto frame = world.Import(graph);
+	frame.Atlas = graph.ImportTexture(*atlas, Rhi::ResourceState::ShaderRead);
+	frame.StaticAtlas = graph.ImportTexture(*staticAtlas, Rhi::ResourceState::ShaderRead);
+	frame.Render = { 1, 1, 1, 0, 0, 0, 0 };
+	// View 0 redraws its static tile, view 1 reuses it, view 2 has no layer.
+	frame.StaticRender = { 1, 0, 2, 2, 2, 2, 2 };
+	auto wrong = frame;
+	wrong.StaticRender.pop_back();
+	SWIM_CHECK_THROWS(renderer.Record(graph, wrong), std::invalid_argument);
+	const auto resources = renderer.Record(graph, frame);
+	graph.Export(resources.Atlas, Rhi::ResourceState::ShaderRead);
+	graph.Export(*frame.StaticAtlas, Rhi::ResourceState::ShaderRead);
+	SWIM_CHECK_EQUAL(resources.RenderedViews, 3u);
+	world.Execute(graph);
+	// Culls: view 0 static, then the dynamic (or whole) cull of each drawn view.
+	SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(4));
+	// Tile clears: view 0's static tile and view 2's whole tile; layered tiles are copied over.
+	SWIM_CHECK_EQUAL(world.Commands("Draw").size(), std::size_t(2));
+	SWIM_CHECK_EQUAL(world.Commands("DrawIndexedIndirectCount").size(), std::size_t(4 * 2 * 2));
+	const auto copies = world.Commands("CopyTexture");
+	SWIM_REQUIRE_EQUAL(copies.size(), std::size_t(2));
+	SWIM_CHECK(copies[0].Source == staticAtlas.get() && copies[0].Destination == atlas.get());
+	SWIM_CHECK(copies[0].SourceOffset == world.plan.Draws[0].Tile.X && copies[0].Size == world.plan.Draws[0].Tile.Size);
+	SWIM_CHECK(copies[1].SourceOffset == world.plan.Draws[1].Tile.X);
+
+	// First use: neither atlas holds depth (both imported undefined). Kept static tiles are
+	// redrawn, and the copy writes the atlas before the depth pass loads it.
+	RenderGraph first;
+	auto fresh = world.Import(first);
+	fresh.Atlas = first.ImportTexture(*atlas, Rhi::ResourceState::Undefined);
+	fresh.StaticAtlas = first.ImportTexture(*staticAtlas, Rhi::ResourceState::Undefined);
+	fresh.AtlasHoldsDepth = false;
+	fresh.StaticAtlasHoldsDepth = false;
+	fresh.Render = frame.Render;
+	fresh.StaticRender = frame.StaticRender;
+	const auto freshResources = renderer.Record(first, fresh);
+	first.Export(freshResources.Atlas, Rhi::ResourceState::ShaderRead);
+	first.Export(*fresh.StaticAtlas, Rhi::ResourceState::ShaderRead);
+	world.Execute(first);
+	SWIM_CHECK_EQUAL(world.Commands("CopyTexture").size(), std::size_t(2));
+	SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(5)); // Views 0 and 1 cull their static casters too.
+
+	// A dirty rect: the kept view copies and redraws only where its moving casters were and are.
+	RenderGraph partial;
+	auto dirty = world.Import(partial);
+	dirty.Atlas = partial.ImportTexture(*atlas, Rhi::ResourceState::ShaderRead);
+	dirty.StaticAtlas = partial.ImportTexture(*staticAtlas, Rhi::ResourceState::ShaderRead);
+	dirty.Render = frame.Render;
+	dirty.StaticRender = frame.StaticRender;
+	const auto& keptTile = world.plan.Draws[1].Tile;
+	dirty.StaticRects.resize(dirty.StaticRender.size());
+	dirty.StaticRects[1] = { keptTile.X + 8, keptTile.Y + 4, 16, 12 };
+	const auto dirtyResources = renderer.Record(partial, dirty);
+	partial.Export(dirtyResources.Atlas, Rhi::ResourceState::ShaderRead);
+	partial.Export(*dirty.StaticAtlas, Rhi::ResourceState::ShaderRead);
+	world.Execute(partial);
+	const auto rectCopies = world.Commands("CopyTexture");
+	SWIM_REQUIRE_EQUAL(rectCopies.size(), std::size_t(2));
+	SWIM_CHECK(rectCopies[1].SourceOffset == keptTile.X + 8 && rectCopies[1].Size == 16u);
+	SWIM_CHECK(rectCopies[0].Size == world.plan.Draws[0].Tile.Size); // View 0 refreshed: its whole tile.
+}
+
 SWIM_TEST("Render.ShadowRenderer", "EmptyPlansClearTheAtlasAndTheFallbackPathZeroFills")
 {
 	ShadowWorld world;

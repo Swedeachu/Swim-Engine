@@ -188,6 +188,21 @@ Frames:
 3. a moved camera with the red quad moved in front of the green one (the order must flip), without an environment (stand-ins), jittered by (0.37, −0.21) pixels; the CPU ray cast follows the jitter;
 4. 10,000 lights, every 7th pixel compared, with pass timings printed.
 
+## Multisample anti-aliasing
+
+`RenderSettings::MsaaSamples` (1, 2, 4, 8 or 16) multisamples the scene geometry. The count is lowered to the largest one in `GraphicsCapabilities::SampleCounts` at or below it: the counts both colour and depth attachments support and that can be sampled as `Texture2DMS` (Vulkan: the framebuffer and sampled-image limits; D3D12: `MULTISAMPLE_QUALITY_LEVELS` for every target format). `FrameRenderer::GetSupportedMsaaSamples` returns that mask for a settings menu; `RenderStats::MsaaSamples` reports the count a frame used (1 when the multisampled pipelines could not be made, logged once).
+
+- **Passes.** The sky, depth prepass and opaque pass draw into multisampled copies of the seven opaque targets and depth (`ForwardPlusTargets::Samples`), through a second `ForwardPlusRenderer` with multisampled pipelines. `ForwardMsaaResolve.slang` then writes the single-sample targets in one fullscreen pass. Colour, indirect, reflectance and specular are averaged with 1/(1+luma) weights, so a bright sample does not swamp an edge after tone mapping. Depth, normal, velocity and object id come from the nearest sample, never a blend of two surfaces. The main renderer then runs the back depth and the transparent layers at one sample (`ForwardPlusFrame::Opaque = false`).
+- **Downstream.** Particles, render features after the opaque pass, SSAO, SSR, TAA and post processing all read the resolved targets, so MSAA works with TAA on or off and with every `AntiAliasing` mode.
+- **Alpha to coverage.** When multisampled, the view sets `ForwardViewFlagAlphaToCoverage`. Alpha-masked materials then output a sharpened coverage, `saturate((alpha - cutoff) / fwidth(alpha) + 0.5)`, as colour target 0's alpha, and their pipelines enable `GraphicsPipelineDesc::AlphaToCoverage`. The depth prepass uses the `ForwardDepthCoverage` variant, which declares `SV_Target0` for it. Feature geometry opts in with `RenderGeometryState::AlphaToCoverage`; its pipelines are made per sample count (`RenderFeatureDrawContext::Samples`).
+- **RHI.** `DescriptorBindingDesc::Multisampled` marks a `Texture2DMS` binding, reflected by the shader compiler. D3D12 creates `TEXTURE2DMS` views; Vulkan checks the image's sample count against the binding.
+- **Not multisampled:** transparent layers, particles, features drawn after the resolve, shadow maps, and the back depth. Deferred local lights are off; the opaque pass runs the full light loop. `BeforeOpaque` gets no prepass depth, so feature occlusion against it is skipped.
+- **Memory.** The multisampled targets are 52 bytes per pixel per sample, on top of the single-sample targets: about 215 MB at 2x, 430 MB at 4x, 860 MB at 8x and 1.7 GB at 16x at 1920×1080. At 16x the resolve loads 16 samples of seven targets per pixel.
+
+## Cube map sky
+
+`FrameRenderer::SetSkyCubemap(size, faces)` replaces the procedural sky background with six sRGB RGBA8 faces (+X, -X, +Y, -Y, +Z, -Z, a left-handed cube whose +Z is the default forward, world -Z). `SkyCubemap` (`SkyBackground.slang` with `SKY_CUBEMAP=1`) draws it in the sky pass of the main view (any sample count), reflection probe faces and planar captures, scaled by `RenderSettings::SkyCubemapIntensity` and rotated by `EnvironmentRotation`. Fog and the screen-space passes see it like the procedural sky (depth 0); image-based lighting stays procedural. `ClearSkyCubemap` returns to the procedural sky. The cube is drawn only while `RenderSettings::SkyBackground` is on (off: the clear colour, as without a cube); it replaces the whole procedural background (gradient, ground and sun disc), and `RenderStats::SkyCubemap` says whether a frame drew it. Features that draw over sky pixels (sun, moon, stars, clouds) are the caller's to turn off.
+
 ## Deferred local lights (Phase 23 performance work)
 
 With the depth prepass, `ForwardPlusRendererDesc::OpaqueDeferred` (SwimForwardOpaqueDeferred: the prepassed opaque program with `FORWARD_DEFERRED_LOCAL=1`) and `LocalLightsPipeline` (ForwardLocalLights.slang), a frame with `ForwardPlusFrame::DeferLocalLights` and a Storage-capable colour target is drawn in two steps:
@@ -196,3 +211,13 @@ With the depth prepass, `ForwardPlusRendererDesc::OpaqueDeferred` (SwimForwardOp
 2. a compute pass (`<name> local lights`, 8 x 8 threads) reconstructs each opaque pixel's position from depth and adds its cluster's point and spot lights, with shadows, to the colour target, before the transparent pass. The wave walks the union of its pixels' cluster masks (`WaveActiveBitOr`) so loop control and light loads stay uniform.
 
 The per-light work is exactly the fragment loop's, so the image is the same (animated foliage aside, captures differ in 0.4 % of pixels by more than 8/255); it runs without the helper lanes of partly covered quads and in a small, high-occupancy program. In the sandbox's Sponza view (256 lights) the opaque pass went from 3.9 ms to 1.0 ms plus 1.4 ms for the lights. `RenderSettings::DeferredLocalLights` (switch `lighting.deferred-local-lights`) turns it off. Transparent draws keep the fragment loop.
+
+## Register pressure (measured with `SWIM_PIPELINE_STATS=1`)
+
+Driver statistics for the opaque fragment program (RTX 4070 Laptop, subgroup 32), measured by swapping shader variants into the forward+ smoke:
+
+- Opaque with local lights in the loop (the prepassed program, used whenever deferred local lights are off): **80 registers**. The deferred-local program: **64**. Transparent: 72.
+- Deferred local lights are skipped for any frame with opaque external draws (`DrawsIn(External, Opaque)`): an application that draws its world geometry through a render feature (terrain, for example) always runs the 80-register program, and that feature's own shader, which includes `ForwardFrame.slang` and calls `ForwardLightSurface`, pays the same light loop.
+- What does not lower the 80: compiling out the glint or the cluster heatmap (binary 28.8 KB to 23.4 KB, registers unchanged), sampling emission after the light loop (95), splitting the directional and local loops, scalarising the cascade blend, `[loop]` on the PCF.
+- What does: the light loop is the pressure (48 without it), and the directional cascade path of `ShadowFactor` is most of it. With the directional shadow replaced by one texture read (local shadows kept) the program drops to **71** (about 24 to 28 resident warps). The deferred-local program stays at 64 either way.
+- A screen-space directional shadow mask resolved from prepass depth would get that 71, but deferred for now: the prepass has no shading normals, so the mask's normal-offset and slope bias would differ from the in-loop lookup (visible at normal-mapped surfaces and silhouettes), and feature shaders would need their own mask variant. Revisit it with the path-traced shadow target, as one shared mask both can write.

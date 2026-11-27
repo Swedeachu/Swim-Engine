@@ -17,6 +17,7 @@
 #include "Tests/Fixtures/ClusterFixture.h"
 #include "Tests/Fixtures/ForwardPlusFixture.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_FORWARD_OPAQUE_SPIRV_PATH) && defined(SWIM_FORWARD_TRANSPARENT_SPIRV_PATH) &&                                             \
@@ -68,7 +69,7 @@ namespace
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", bytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytes } } };
 		DrawProgram program;
-		program.Program = device.CreateShaderProgram({ stages, { draw.DescriptorSchemas, draw.PushConstants }, label });
+		program.Program = device.CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(draw), label });
 		SWIM_REQUIRE(program.Program);
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), label, { &bindlessSpace, 1 } });
 		SWIM_REQUIRE(program.Layout);
@@ -165,9 +166,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Forward+ smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		const auto& capabilities = graphics->GetAdapter(0).GetInfo().Capabilities;
 		SWIM_REQUIRE_MESSAGE(capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
@@ -588,7 +587,10 @@ namespace
 			visibilityFrame.IndexPages = { pageSlot.IndexPage };
 			visibilityFrame.ZeroUnusedCommands = NeedsZeroedCommands(path);
 			const auto visible = visibility.Record(graph, sceneResources, geometry, visibilityFrame);
-			const auto clusters = assigner.Record(graph, lightResources, gridDesc, clusterView);
+			// The bitmasks address every local light (FrameRenderer sizes the grid the same way).
+			auto frameGrid = gridDesc;
+			frameGrid.LightCapacity = std::max(gridDesc.LightCapacity, (lightResources.LocalCount + 255u) / 256u * 256u);
+			const auto clusters = assigner.Record(graph, lightResources, frameGrid, clusterView);
 
 			const auto target = [&](Rhi::Format format, Rhi::TextureUsage usage, const char* name)
 			{
@@ -1165,7 +1167,7 @@ namespace
 		SWIM_CHECK(
 			side.DeformedPixels > 200u); // The gold cube, now deforming, is in view.							   // The camera moved.
 
-		// 10,000 lights: clusters may truncate; the CPU uses the GPU's own lists.
+		// 10,000 lights: the grid grows to address them all; the CPU uses the GPU's own lists.
 		for (int i = 0; i < 9700; ++i)
 		{
 			lights.Create(localLight(1.4f));
@@ -1199,9 +1201,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Clustered lighting benchmark requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const auto cull =
@@ -1373,17 +1373,8 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClusteredForwardPlusMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunForwardPlusSmoke);
-				} });
-			Swim::Testing::TestRegistry::Get().Add(
-				{ "RHI.Vulkan.Smoke", "ClusteredLightingScalesToTensOfThousandsOfLights", SWIM_TEST_LOCATION,
-					+[]
-					{
-						Swim::Testing::RunValidatedVulkanSmoke(&RunClusteredLightingBenchmark);
-					} });
+			Swim::Testing::AddSmoke<&RunForwardPlusSmoke>("ClusteredForwardPlusMatchesTheCpuReference", SWIM_TEST_LOCATION);
+			Swim::Testing::AddSmoke<&RunClusteredLightingBenchmark>("ClusteredLightingScalesToTensOfThousandsOfLights", SWIM_TEST_LOCATION);
 		}
 
 		return true;

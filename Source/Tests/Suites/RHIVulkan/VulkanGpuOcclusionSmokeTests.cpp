@@ -11,6 +11,7 @@
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityReference.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_GPU_VISIBILITY_SPIRV_PATH) && defined(SWIM_RHI_GPU_DRIVEN_DRAW_SPIRV_PATH) && defined(SWIM_HZB_REDUCE_SPIRV_PATH)
@@ -34,7 +35,7 @@ namespace
 #ifdef SWIM_GPU_OCCLUSION_SMOKE_AVAILABLE
 	std::vector<std::byte> ReadProgram(const char* path)
 	{
-		std::ifstream file(path, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(path), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytes(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -47,7 +48,7 @@ namespace
 	{
 		const auto reflection = Swim::ShaderCompiler::LoadSlangReflectionJson(path);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		auto converted = Swim::ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, path);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		return converted;
 	}
@@ -97,9 +98,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "GPU occlusion smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE(graphics->GetAdapter(0).GetInfo().Capabilities.IndirectCount);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
@@ -110,8 +109,7 @@ namespace
 		{
 			const auto& programInterface = reflected.Interface;
 			const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytes };
-			program = device->CreateShaderProgram({ { &stage, 1 },
-				{ programInterface.DescriptorSchemas, programInterface.PushConstants, programInterface.ComputeThreadGroupSize }, label });
+			program = device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(programInterface), label });
 			SWIM_REQUIRE(program);
 			layout = device->CreatePipelineLayout({ program.get(), label });
 			SWIM_REQUIRE(layout);
@@ -130,7 +128,7 @@ namespace
 		const auto& draw = drawInterface.Interface;
 		const std::array<Rhi::ShaderStageArtifact, 2> drawStages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", drawBytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", drawBytes } } };
-		auto drawProgram = device->CreateShaderProgram({ drawStages, { draw.DescriptorSchemas, draw.PushConstants }, "GPU-driven draw" });
+		auto drawProgram = device->CreateShaderProgram({ drawStages, Swim::Testing::SmokeInterfaceDesc(draw), "GPU-driven draw" });
 		SWIM_REQUIRE(drawProgram);
 		auto drawLayout = device->CreatePipelineLayout({ drawProgram.get(), "GPU-driven draw layout" });
 		SWIM_REQUIRE(drawLayout);
@@ -548,12 +546,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add(
-				{ "RHI.Vulkan.Smoke", "GpuOcclusionTwoPhaseHzbRevealsNewlyVisibleObjects", SWIM_TEST_LOCATION,
-					+[]
-					{
-						Swim::Testing::RunValidatedVulkanSmoke(&RunGpuOcclusionSmoke);
-					} });
+			Swim::Testing::AddSmoke<&RunGpuOcclusionSmoke>("GpuOcclusionTwoPhaseHzbRevealsNewlyVisibleObjects", SWIM_TEST_LOCATION);
 		}
 
 		return true;

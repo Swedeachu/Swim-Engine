@@ -17,6 +17,30 @@ namespace Swim::Rhi
 		Count,
 	};
 
+	// The file extension of a runtime program's bytecode for an API: DXIL for D3D12, SPIR-V
+	// otherwise (the null backend accepts any bytes).
+	constexpr std::string_view ShaderBytecodeExtension(GraphicsApi api)
+	{
+		return api == GraphicsApi::D3D12 ? ".dxil" : ".spv";
+	}
+
+	constexpr std::string_view ToString(GraphicsApi api)
+	{
+		switch (api)
+		{
+		case GraphicsApi::Vulkan:
+			return "Vulkan";
+		case GraphicsApi::D3D12:
+			return "D3D12";
+		case GraphicsApi::Metal:
+			return "Metal";
+		case GraphicsApi::Null:
+			return "Null";
+		default:
+			return "Unknown";
+		}
+	}
+
 	enum class Format : std::uint16_t
 	{
 		Undefined = 0,
@@ -128,6 +152,7 @@ namespace Swim::Rhi
 		switch (format)
 		{
 		case Format::R32Float:
+		case Format::R16Float: // Needs GraphicsCapabilities::StorageImageExtendedFormats in shaders.
 		case Format::R32Uint:
 		case Format::R32Sint:
 		case Format::RGBA32Float:
@@ -419,6 +444,7 @@ namespace Swim::Rhi
 		X2 = 2,
 		X4 = 4,
 		X8 = 8,
+		X16 = 16,
 	};
 
 	struct BlendAttachmentState
@@ -450,6 +476,12 @@ namespace Swim::Rhi
 		FrontFace Winding = FrontFace::CounterClockwise;
 		bool DepthClamp = false;
 		bool Wireframe = false;
+		// Depth bias added to each fragment's depth before the depth test: Constant in units of
+		// the depth format's smallest resolvable step (rounded to a whole step on back ends
+		// with an integer bias), Slope times the primitive's maximum depth slope. Positive
+		// moves fragments towards a larger depth value (nearer with reverse-Z). 0 = none.
+		float DepthBiasConstant = 0.0f;
+		float DepthBiasSlope = 0.0f;
 	};
 
 	struct DepthStencilState
@@ -509,6 +541,9 @@ namespace Swim::Rhi
 		// written after the table is bound and while submitted work is pending,
 		// provided that pending work does not dynamically access the rewritten element.
 		bool UpdateAfterBind = false;
+		// SampledTexture only: a multisampled Texture2D (Texture2DMS in the shader). Views bound
+		// to it must be of a texture with more than one sample; the shader loads samples by index.
+		bool Multisampled = false;
 	};
 
 	struct DescriptorSchemaDesc
@@ -561,6 +596,10 @@ namespace Swim::Rhi
 		std::uint32_t MaxColorAttachments = 0;
 		std::uint32_t MaxTextureArrayLayers = 0; // 0: not reported.
 		std::uint32_t MaxSamples = 1;
+		// Every sample count (SampleCount values ORed: bit 1 = one sample ... bit 16 = 16) that
+		// colour and depth attachments both support and that can also be sampled as
+		// Texture2DMS. MaxSamples is the largest framebuffer count and may exceed this set.
+		std::uint32_t SampleCounts = 1;
 		std::uint32_t SubgroupSize = 0;
 		std::uint64_t MinUniformBufferOffsetAlignment = 1;
 		std::uint64_t MinStorageBufferOffsetAlignment = 1;
@@ -585,6 +624,8 @@ namespace Swim::Rhi
 		// Backend can negotiate HDR color spaces; query each window for usable pairs.
 		bool HdrSwapchain = false;
 		bool SampledCubeArray = false; // Optional enabled device feature; not required by the baseline.
+		// Storage images in the extended formats (r16f, rg16f, r8, ...). Optional enabled feature.
+		bool StorageImageExtendedFormats = false;
 		// Partially bound, update-after-bind (including while unused elements are pending)
 		// and nonuniformly indexed sampler/sampled-texture arrays. Optional; bindless
 		// descriptor spaces are rejected without it. Size them with Descriptors.MaxBindless*.

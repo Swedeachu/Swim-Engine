@@ -1,6 +1,7 @@
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
@@ -25,7 +26,7 @@ namespace
 		using namespace Swim;
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_PUSH_CONSTANTS_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto interface = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto interface = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_PUSH_CONSTANTS_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(interface, interface.Error);
 		SWIM_REQUIRE_EQUAL(interface.Interface.PushConstants.size(), 1u);
 		const auto range = interface.Interface.PushConstants[0];
@@ -38,7 +39,7 @@ namespace
 		static_assert(sizeof(DrawConstants) == 32 && offsetof(DrawConstants, Color) == 16);
 		SWIM_REQUIRE_EQUAL(range.Offset, 0u);
 		SWIM_REQUIRE_EQUAL(range.Size, sizeof(DrawConstants));
-		std::ifstream file(SWIM_RHI_PUSH_CONSTANTS_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_PUSH_CONSTANTS_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE_MESSAGE(file, "Compiled RHI push-constant shader is missing");
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -53,17 +54,15 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Push-constant smoke requires the full Swim Vulkan baseline");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{{
 			{ Rhi::ShaderStageMask::Vertex, "vertexMain", bytecode },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytecode }
 		}};
-		auto program = device->CreateShaderProgram({ stages,
-			{ interface.Interface.DescriptorSchemas, interface.Interface.PushConstants }, "RHI push constants" });
+		auto program =
+			device->CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(interface.Interface), "RHI push constants" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "RHI push layout" });
 		auto compatibleLayout = device->CreatePipelineLayout({ program.get(), "RHI compatible push layout" });
@@ -192,8 +191,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PushConstantUpdatesAndCompatiblePipelinePixels", SWIM_TEST_LOCATION,
-				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunPushConstantSmoke); } });
+			Swim::Testing::AddSmoke<&RunPushConstantSmoke>("PushConstantUpdatesAndCompatiblePipelinePixels", SWIM_TEST_LOCATION);
 		}
 
 		return true;

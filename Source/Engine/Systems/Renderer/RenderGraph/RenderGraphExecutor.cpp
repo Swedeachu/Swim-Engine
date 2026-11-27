@@ -186,7 +186,7 @@ namespace Swim::Render
 		state->Commands->Transitions(buffers, textures);
 	}
 
-	Rhi::TimelinePoint RenderGraphExecutor::Execute(const CompiledRenderGraph& graph, const Rhi::SubmitDesc& synchronization)
+	void RenderGraphExecutor::ValidateExecute(const CompiledRenderGraph& graph, const Rhi::SubmitDesc& synchronization) const
 	{
 		if (!graph.definition || !synchronization.CommandLists.empty())
 		{
@@ -213,27 +213,10 @@ namespace Swim::Render
 		{
 			throw std::overflow_error("RenderGraph timeline exhausted");
 		}
+	}
 
-		using Clock = std::chrono::steady_clock;
-		const auto ms = [](Clock::time_point a, Clock::time_point b)
-		{
-			return std::chrono::duration<double, std::milli>(b - a).count();
-		};
-		lastTimings = {};
-		auto mark = Clock::now();
-		Wait();
-		lastTimings.Wait = ms(mark, Clock::now());
-		mark = Clock::now();
-
-		state->Commands.reset();
-		state->CommandPool->Reset();
-		RecycleDescriptorTables(graph);
-		state->Retained.clear();
-		// The timestamp pool is kept while it is large enough (it is reset in the command list).
-		state->HasResult = false;
-		lastTimings.Reset = ms(mark, Clock::now());
-		mark = Clock::now();
-
+	void RenderGraphExecutor::AllocateResources(const CompiledRenderGraph& graph)
+	{
 		state->Graph = graph; // Own the immutable description and callbacks through completion.
 		state->Resources.assign(graph.definition->Resources.size(), nullptr);
 
@@ -331,13 +314,10 @@ namespace Swim::Render
 				state->Resources[r] = slots[graph.shape->Lifetimes[r].Allocation];
 			}
 		}
+	}
 
-		lastTimings.Allocate = ms(mark, Clock::now());
-		mark = Clock::now();
-		StageBuffers(graph); // Runs upload writers; failure leaves no published result.
-		lastTimings.Stage = ms(mark, Clock::now());
-		mark = Clock::now();
-
+	void RenderGraphExecutor::PrepareQueries(const CompiledRenderGraph& graph)
+	{
 		if (graph.shape->Schedule.empty() || !state->Device.GetQueue(Rhi::QueueType::Graphics).GetTimestampInfo().IsSupported())
 		{
 			state->Queries.reset();
@@ -362,7 +342,115 @@ namespace Swim::Render
 				throw std::runtime_error("RenderGraph timestamp pool allocation failed");
 			}
 		}
+	}
 
+	void RenderGraphExecutor::RecordPasses(const CompiledRenderGraph& graph)
+	{
+		using Clock = std::chrono::steady_clock;
+
+		if (state->Queries)
+		{
+			state->Commands->ResetQueries(*state->Queries, 0, state->Queries->GetDesc().Count);
+		}
+
+		std::uint32_t query = 0;
+
+		for (const auto& scheduled : graph.shape->Schedule)
+		{
+			const auto& pass = graph.definition->Passes[scheduled.Pass];
+			state->Commands->BeginDebugLabel(pass.Name);
+
+			if (state->Queries)
+			{
+				state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::Begin);
+			}
+
+			const auto barrierStart = Clock::now();
+
+			RecordBarriers(scheduled.Barriers);
+
+			const auto passStart = Clock::now();
+			lastTimings.Barriers += std::chrono::duration<double, std::milli>(passStart - barrierStart).count();
+			RenderCommandContext context(*state, scheduled.Pass);
+			pass.Execute(context);
+			lastTimings.Passes.push_back(
+				{ pass.Name, std::chrono::duration<double, std::nano>(Clock::now() - passStart).count(), std::nullopt });
+
+			if (state->Queries)
+			{
+				state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::End);
+			}
+
+			state->Commands->EndDebugLabel();
+		}
+
+		RecordBarriers(graph.shape->FinalBarriers);
+	}
+
+	Rhi::TimelinePoint RenderGraphExecutor::SubmitRecorded(
+		const Rhi::SubmitDesc& synchronization, std::chrono::steady_clock::time_point mark)
+	{
+		const bool uploads = state->Upload && state->Upload->GetUsedBytes() != 0;
+		const bool readbacks = state->Readback && state->Readback->GetUsedBytes() != 0;
+
+		if (uploads)
+		{
+			state->Upload->Flush();
+		}
+
+		if (readbacks)
+		{
+			Rhi::ReadbackSubmission::Validate(*state->Readback);
+		}
+
+		std::vector<Rhi::TimelinePoint> signals(synchronization.SignalTimelines.begin(), synchronization.SignalTimelines.end());
+		signals.push_back({ state->Timeline.get(), state->Submitted + 1 });
+		auto* commands = state->Commands.get();
+		auto submit = synchronization;
+		submit.CommandLists = { &commands, 1 };
+		submit.SignalTimelines = signals;
+		state->Device.GetQueue(Rhi::QueueType::Graphics).Submit(submit);
+
+		++state->Submitted;
+		lastTimings.Submit = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - mark).count();
+
+		if (readbacks)
+		{
+			Rhi::ReadbackSubmission::Commit(*state->Readback, state->Timeline, state->Submitted);
+		}
+
+		return { state->Timeline.get(), state->Submitted };
+	}
+
+	Rhi::TimelinePoint RenderGraphExecutor::Execute(const CompiledRenderGraph& graph, const Rhi::SubmitDesc& synchronization)
+	{
+		ValidateExecute(graph, synchronization);
+		using Clock = std::chrono::steady_clock;
+		const auto ms = [](Clock::time_point a, Clock::time_point b)
+		{
+			return std::chrono::duration<double, std::milli>(b - a).count();
+		};
+		lastTimings = {};
+		auto mark = Clock::now();
+		Wait();
+		lastTimings.Wait = ms(mark, Clock::now());
+		mark = Clock::now();
+
+		state->Commands.reset();
+		state->CommandPool->Reset();
+		RecycleDescriptorTables(graph);
+		state->Retained.clear();
+		// The timestamp pool is kept while it is large enough (it is reset in the command list).
+		state->HasResult = false;
+		lastTimings.Reset = ms(mark, Clock::now());
+		mark = Clock::now();
+		AllocateResources(graph);
+		lastTimings.Allocate = ms(mark, Clock::now());
+		mark = Clock::now();
+		StageBuffers(graph); // Runs upload writers; failure leaves no published result.
+		lastTimings.Stage = ms(mark, Clock::now());
+		mark = Clock::now();
+		PrepareQueries(graph);
 		lastTimings.Queries = ms(mark, Clock::now());
 		mark = Clock::now();
 		state->Commands = state->CommandPool->CreateCommandList();
@@ -377,81 +465,13 @@ namespace Swim::Render
 		try
 		{
 			state->Commands->Begin();
-
-			if (state->Queries)
-			{
-				state->Commands->ResetQueries(*state->Queries, 0, state->Queries->GetDesc().Count);
-			}
-
-			std::uint32_t query = 0;
-
-			for (const auto& scheduled : graph.shape->Schedule)
-			{
-				const auto& pass = graph.definition->Passes[scheduled.Pass];
-				state->Commands->BeginDebugLabel(pass.Name);
-
-				if (state->Queries)
-				{
-					state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::Begin);
-				}
-
-				const auto barrierStart = Clock::now();
-
-				RecordBarriers(scheduled.Barriers);
-
-				const auto passStart = Clock::now();
-				lastTimings.Barriers += ms(barrierStart, passStart);
-				RenderCommandContext context(*state, scheduled.Pass);
-				pass.Execute(context);
-				lastTimings.Passes.push_back(
-					{ pass.Name, std::chrono::duration<double, std::nano>(Clock::now() - passStart).count(), std::nullopt });
-
-				if (state->Queries)
-				{
-					state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::End);
-				}
-
-				state->Commands->EndDebugLabel();
-			}
-
-			RecordBarriers(graph.shape->FinalBarriers);
-
+			RecordPasses(graph);
 			state->Commands->End();
 			lastTimings.Record = ms(mark, Clock::now());
-			mark = Clock::now();
-
-			const bool uploads = state->Upload && state->Upload->GetUsedBytes() != 0;
-			const bool readbacks = state->Readback && state->Readback->GetUsedBytes() != 0;
-
-			if (uploads)
-			{
-				state->Upload->Flush();
-			}
-
-			if (readbacks)
-			{
-				Rhi::ReadbackSubmission::Validate(*state->Readback);
-			}
-
-			std::vector<Rhi::TimelinePoint> signals(synchronization.SignalTimelines.begin(), synchronization.SignalTimelines.end());
-			signals.push_back({ state->Timeline.get(), state->Submitted + 1 });
-			auto* commands = state->Commands.get();
-			auto submit = synchronization;
-			submit.CommandLists = { &commands, 1 };
-			submit.SignalTimelines = signals;
-			state->Device.GetQueue(Rhi::QueueType::Graphics).Submit(submit);
-
-			++state->Submitted;
-			lastTimings.Submit = ms(mark, Clock::now());
-
-			if (readbacks)
-			{
-				Rhi::ReadbackSubmission::Commit(*state->Readback, state->Timeline, state->Submitted);
-			}
-
+			const auto point = SubmitRecorded(synchronization, Clock::now());
 			state->HasResult = true;
 			state->Recording = false;
-			return { state->Timeline.get(), state->Submitted };
+			return point;
 		}
 		catch (...)
 		{

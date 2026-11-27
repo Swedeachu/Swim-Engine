@@ -56,6 +56,11 @@ namespace Swim::Render
 	// relocation callback before Import returns, so the caller updates every offset it
 	// gives the GPU for that frame. All work is on the graph's queue, ordered against the
 	// frame's other passes by the graph, so a freed range may be reused at once.
+	//
+	// When the graph is abandoned instead of executed, its writes go back to the queue
+	// (IsUploaded turns false again) and its moves stay in effect on the CPU side: the next
+	// Import copies those ranges first, before anything else in that frame can reuse the
+	// space they left, so offsets the caller already updated stay right.
 	class StreamingBuffer
 	{
 
@@ -125,6 +130,13 @@ namespace Swim::Render
 			std::uint64_t Size = 0;
 		};
 
+		// A move recorded into a graph that was abandoned: the next Import makes the copy.
+		struct Carried
+		{
+			StreamingRange Range;
+			Move Copy;
+		};
+
 		const Slot& Get(StreamingRange range) const;
 
 		std::optional<std::uint64_t> TakeFree(std::uint64_t size);
@@ -141,6 +153,7 @@ namespace Swim::Render
 		std::multimap<std::uint64_t, std::uint64_t> freeBySize;
 		std::map<std::uint64_t, std::uint32_t> rangesByOffset;
 		std::deque<PendingWrite> pending;
+		std::vector<Carried> carried;
 		RelocationCallback relocated;
 		std::uint64_t defragmentBudget = 4ull << 20;
 		StreamingBufferStats stats;

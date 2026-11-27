@@ -17,6 +17,7 @@
 #include "Tests/Fixtures/ClusterFixture.h"
 #include "Tests/Fixtures/ShadowFixture.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_SHADOW_DEPTH_SPIRV_PATH) && defined(SWIM_SHADOW_MASKED_SPIRV_PATH) && defined(SWIM_FORWARD_OPAQUE_SPIRV_PATH) &&          \
@@ -67,8 +68,7 @@ namespace
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", bytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytes } } };
 		GraphicsProgram program;
-		program.Program =
-			device.CreateShaderProgram({ stages, { programInterface.DescriptorSchemas, programInterface.PushConstants }, label });
+		program.Program = device.CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(programInterface), label });
 		SWIM_REQUIRE(program.Program);
 
 		if (bindlessSpace)
@@ -161,9 +161,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Shadow smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		const auto& capabilities = graphics->GetAdapter(0).GetInfo().Capabilities;
 		SWIM_REQUIRE_MESSAGE(capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
@@ -201,6 +199,12 @@ namespace
 			LoadGraphics(*device, SWIM_SHADOW_DEPTH_SPIRV_PATH, SWIM_SHADOW_DEPTH_REFLECTION_PATH, nullptr, "Shadow depth", shadowPipeline);
 		const auto shadowMasked = LoadGraphics(*device, SWIM_SHADOW_MASKED_SPIRV_PATH, SWIM_SHADOW_MASKED_REFLECTION_PATH,
 			&shadowBindlessSpace, "Shadow masked", shadowPipeline);
+		const auto shadowClear =
+			LoadGraphics(*device, SWIM_SHADOW_CLEAR_SPIRV_PATH, SWIM_SHADOW_CLEAR_REFLECTION_PATH, nullptr, "Shadow clear",
+				[](Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout)
+				{
+					return ShadowRenderer::ClearPipelineDesc(program, layout);
+				});
 
 		const auto path = SelectVisibilityDrawPath(capabilities);
 		ForwardPlusRendererDesc rendererDesc;
@@ -213,6 +217,7 @@ namespace
 		ShadowRendererDesc shadowDesc;
 		shadowDesc.Opaque = { shadowDepth.Pipeline.get(), shadowDepth.Layout.get() };
 		shadowDesc.Masked = { shadowMasked.Pipeline.get(), shadowMasked.Layout.get() };
+		shadowDesc.Clear = { shadowClear.Pipeline.get(), shadowClear.Layout.get() };
 		shadowDesc.DrawPath = path;
 		const ShadowRenderer shadowRenderer(shadowDesc);
 		ClusteredLightAssignerDesc assignerDesc;
@@ -505,12 +510,18 @@ namespace
 			const char* Name;
 			ShadowSettings Settings;
 			std::vector<ShadowCasterDesc> Casters;
+			// A persistent atlas (the cascade cache): loaded when it holds depth, and only the
+			// views Render marks (all when empty) are cleared and redrawn.
+			Rhi::Texture* Cached = nullptr;
+			bool HoldsDepth = false;
+			std::vector<std::uint8_t> Render;
 		};
 
 		struct FrameResult
 		{
 			ShadowPlan Plan;
 			std::uint32_t Shadowed = 0; // Pixels a shadow visibly darkens.
+			std::vector<float> Atlas;	// The GPU atlas as read back.
 		};
 
 		const auto frame = [&](const FrameSpec& spec)
@@ -544,7 +555,23 @@ namespace
 			shadowFrame.Bindless = &bindless.GetTable();
 			shadowFrame.Plan = &plan;
 			shadowFrame.ZeroUnusedCommands = NeedsZeroedCommands(path);
+			std::optional<GraphTexture> cached;
+
+			if (spec.Cached)
+			{
+				cached =
+					graph.ImportTexture(*spec.Cached, spec.HoldsDepth ? Rhi::ResourceState::ShaderRead : Rhi::ResourceState::Undefined);
+				shadowFrame.Atlas = cached;
+				shadowFrame.AtlasHoldsDepth = spec.HoldsDepth;
+				shadowFrame.Render = spec.Render;
+			}
+
 			const auto shadows = shadowRenderer.Record(graph, shadowFrame);
+
+			if (cached)
+			{
+				graph.Export(*cached, Rhi::ResourceState::ShaderRead);
+			}
 
 			RenderViewDesc viewDesc;
 			viewDesc.ViewProjection = viewProjection;
@@ -617,6 +644,7 @@ namespace
 			std::vector<ClusterRecord> clusterRecords(clusterCount);
 			std::vector<std::uint32_t> clusterIndices(std::size_t(clusterCount) * ClusterBlockWords(clusters.GridRecord));
 			read(atlasReadback, gpuAtlas.Depth);
+			result.Atlas = gpuAtlas.Depth;
 			read(colorReadback, colorHalves);
 			read(idReadback, ids);
 			read(recordsReadback, clusterRecords);
@@ -860,6 +888,40 @@ namespace
 		SWIM_CHECK_EQUAL(full.Plan.Stats.Evicted + full.Plan.Stats.OverBudget, 0u);
 		SWIM_CHECK(full.Shadowed > 1000u);
 
+		// Frames 2-4: the cascade cache. The persistent atlas is drawn whole, then every view is
+		// cleared by tile and redrawn over the loaded atlas, then only the first view is redrawn
+		// and the rest keep their depth. Each must match the CPU maps like a fresh atlas.
+		Rhi::TextureDesc cachedDesc;
+		cachedDesc.Extent = { settings.AtlasSize, settings.AtlasSize, 1 };
+		cachedDesc.PixelFormat = ShadowRenderer::AtlasFormat;
+		cachedDesc.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferSource;
+		cachedDesc.DebugName = "Shadow atlas (cached)";
+		const auto cachedAtlas = device->CreateTexture(cachedDesc);
+		SWIM_REQUIRE(cachedAtlas);
+		const std::vector<ShadowCasterDesc> casters{ casterOf(0, 10.0f), casterOf(1, 5.0f), casterOf(2, 3.0f) };
+		// The same plan and casters: every texel matches the fresh atlas, borders included.
+		const auto sameAtlas = [&](const FrameResult& cachedFrame)
+		{
+			std::size_t different = 0;
+
+			for (std::size_t i = 0; i < full.Atlas.size() && i < cachedFrame.Atlas.size(); ++i)
+			{
+				different += full.Atlas[i] != cachedFrame.Atlas[i] ? 1u : 0u;
+			}
+
+			std::printf("             [shadows cached] %zu texels differ from the fresh atlas\n", different);
+			SWIM_CHECK_EQUAL(cachedFrame.Atlas.size(), full.Atlas.size());
+			SWIM_CHECK_EQUAL(different, std::size_t(0));
+		};
+		const auto first = frame({ "cached first", settings, casters, cachedAtlas.get(), false, {} });
+		sameAtlas(first);
+		const auto redrawn = frame({ "cached redraw", settings, casters, cachedAtlas.get(), true, {} });
+		sameAtlas(redrawn);
+		std::vector<std::uint8_t> firstOnly(redrawn.Plan.Draws.size(), 0);
+		firstOnly.front() = 1;
+		const auto partial = frame({ "cached partial", settings, casters, cachedAtlas.get(), true, firstOnly });
+		sameAtlas(partial);
+
 		// Frame 2: a small atlas and a second point light. Three 512 cascades and the
 		// 512 spot fill a 1024 atlas: the first point light is evicted, the second is
 		// over the one-point budget; both are unshadowed on the GPU and the CPU alike.
@@ -894,11 +956,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ShadowedForwardPlusMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunShadowSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunShadowSmoke>("ShadowedForwardPlusMatchesTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

@@ -4,6 +4,7 @@
 #include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
 #include "Engine/Systems/Renderer/Resources/GpuSamplerCache.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_BINDLESS_SPIRV_PATH
@@ -33,10 +34,10 @@ namespace
 		using S = Rhi::ResourceState;
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_BINDLESS_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_BINDLESS_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
-		std::ifstream file(SWIM_RHI_BINDLESS_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_BINDLESS_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytecode(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -45,9 +46,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Bindless smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto& adapter = graphics->GetAdapter(0);
 		SWIM_REQUIRE_MESSAGE(
 			adapter.GetInfo().Capabilities.BindlessDescriptors, "Adapter lacks update-unused-while-pending bindless support");
@@ -68,8 +67,7 @@ namespace
 		}
 
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
-		auto program = device->CreateShaderProgram(
-			{ { &stage, 1 }, { interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "Bindless" });
+		auto program = device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(interface), "Bindless" });
 		SWIM_REQUIRE(program);
 		SWIM_CHECK(!device->CreatePipelineLayout({ program.get(), "Unsized bindless layout" })); // Needs the explicit capacity.
 		auto layout = device->CreatePipelineLayout({ program.get(), "Bindless layout", { &shared, 1 } });
@@ -289,11 +287,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "BindlessTableTimelineSafeReuse", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunBindlessSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunBindlessSmoke>("BindlessTableTimelineSafeReuse", SWIM_TEST_LOCATION);
 		}
 
 		return true;

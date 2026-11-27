@@ -139,7 +139,8 @@ namespace Engine
 			std::uint32_t VertexPage = 0;
 		};
 
-		std::vector<PageSlot> CollectPageSlots(bool* conflict = nullptr) const;
+		// Valid until the next call.
+		const std::vector<PageSlot>& CollectPageSlots(bool* conflict = nullptr) const;
 
 		// GPU meshes created outside residency (skinned outputs) that draws may use; their
 		// pages join CollectPageSlots.
@@ -193,6 +194,8 @@ namespace Engine
 		mutable std::uint64_t pageSlotsKey[2] = { UINT64_MAX, UINT64_MAX };
 		mutable std::vector<PageSlot> pageSlots;
 		mutable bool pageSlotsConflict = false;
+		mutable std::vector<MeshHandle> sortedMeshes; // meshes by path, as of sortedMeshesVersion.
+		mutable std::uint64_t sortedMeshesVersion = UINT64_MAX;
 		std::uint64_t meshReplacements = 0;
 		std::uint64_t replacements = 0;
 	};

@@ -12,28 +12,22 @@ namespace Swim::RhiVulkan
 		const auto& layout = RequireActivePipeline();
 		auto& native = RequireResource<VulkanDescriptorTable>(table, GetState());
 
-		if (space != native.GetSpace() || space >= boundTables.size() || !AreDescriptorSpacesCompatible(*native.GetLayoutState(), layout, space) ||
-			!native.IsComplete())
+		if (space != native.GetSpace() || space >= layout.Sets.size() || !native.IsComplete())
 		{
 			throw std::invalid_argument(
 				"Descriptor table must match an identically defined pipeline layout space and have every required element initialized");
 		}
 
+		(computePipeline ? computeTables : graphicsTables).Bind(space, &native, native.GetLayoutState()->Interface, layout.Interface);
+
 		const auto set = FromNativeHandle<VkDescriptorSet>(native.GetNativeHandle());
 		GetState()->Dispatch.vkCmdBindDescriptorSets(commandBuffer, computePipeline ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS, layout.Layout, space, 1, &set, 0, nullptr);
 		native.Seal();
-		boundTables[space] = &native;
 	}
 
 	void VulkanCommandList::RequireDescriptorTables() const
 	{
-		for (const auto& schema : RequireActivePipeline().Interface.DescriptorSchemas)
-		{
-			if (!schema.Bindings.empty() && (schema.Space >= boundTables.size() || boundTables[schema.Space] == nullptr))
-			{
-				throw std::logic_error("Every reflected descriptor space must be bound before drawing or dispatching");
-			}
-		}
+		(computePipeline ? computeTables : graphicsTables).Require(RequireActivePipeline().Interface);
 	}
 
 } // namespace Swim::RhiVulkan

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <unordered_map>
 
 namespace Swim::UI
 {
@@ -485,6 +486,46 @@ namespace Swim::UI
 		const auto previousCount = impl->Quads.size();
 		impl->Quads.clear();
 		impl->RepaintedNodes = 0;
+		// Effective render layers (UiStyle::Layer), memoized per paint.
+		std::unordered_map<std::uint64_t, std::int32_t> layers;
+		const auto layerOf = [&](auto& self, UiNodeId id, std::uint32_t depth) -> std::int32_t
+		{
+			if (!id || depth > 64 || !impl->Nodes.contains(id.Value))
+			{
+				return 0;
+			}
+
+			if (const auto found = layers.find(id.Value); found != layers.end())
+			{
+				return found->second;
+			}
+
+			const auto& node = impl->Get(id);
+			std::int32_t layer = node.Style.Layer;
+
+			if (layer == 0 && node.Parent && node.Parent != impl->Root)
+			{
+				layer = self(self, node.Parent, depth + 1);
+			}
+			else if (layer == 0 && node.Parent == impl->Root)
+			{
+				// Popups and tooltips (root children) follow what opened them.
+				for (const auto& entry : impl->Popups)
+				{
+					if (entry.Node == id)
+					{
+						const auto owner = entry.Desc.Anchor ? entry.Desc.Anchor
+							: id == impl->TooltipShown		 ? impl->TooltipTarget
+															 : entry.PriorFocus;
+						layer = owner != id ? self(self, owner, depth + 1) : 0;
+						break;
+					}
+				}
+			}
+
+			layers[id.Value] = layer;
+			return layer;
+		};
 
 		for (const auto id : impl->Order)
 		{
@@ -512,7 +553,18 @@ namespace Swim::UI
 				++impl->RepaintedNodes;
 			}
 
+			const auto first = impl->Quads.size();
 			impl->Quads.insert(impl->Quads.end(), node.Paint.begin(), node.Paint.end());
+
+			if (!node.Paint.empty())
+			{
+				const auto layer = layerOf(layerOf, id, 0);
+
+				for (auto quad = impl->Quads.begin() + first; quad != impl->Quads.end(); ++quad)
+				{
+					quad->Layer = layer;
+				}
+			}
 		}
 
 		if (impl->RepaintedNodes > 0 || impl->Quads.size() != previousCount || impl->PaintedLayoutRevision != impl->Revision)

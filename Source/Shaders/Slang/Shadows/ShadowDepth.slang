@@ -5,6 +5,7 @@
 // Draws come from a shadow view's GPU caster cull (the instance id is the draw slot);
 // vertices are pulled as StandardVertex. The push constant names the GpuShadowView.
 // Bindings follow ShadowDepthBindings.
+#include "Resources/DrawIndex.slang"
 #include "GpuScene/GpuSceneRecords.slang"
 #include "GpuScene/VisibilityRecords.slang"
 #include "Materials/StandardMaterialParameters.slang"
@@ -47,8 +48,10 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint drawSlotInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint drawSlot = DrawInstanceIndex(drawSlotInput);
 	const GpuDrawRecord record = DrawRecords[drawSlot];
 	const GpuInstanceRecord instance = Instances[record.InstanceRow];
 	const uint base = vertexId * ShadowVertexFloats;

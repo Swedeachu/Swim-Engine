@@ -5,7 +5,22 @@
 // over the sky and screen-space effects see an empty background. The sky mirrors
 // Environment::ProceduralSky::Evaluate (EnvironmentSky.slang), rotated and scaled like
 // the image-based lighting the frame uses.
+//
+// SkyCubemap (SKY_CUBEMAP=1, FrameRenderer::SetSkyCubemap) draws the same background from a
+// cube map instead: the view ray, rotated like the environment, looks the cube up with z
+// mirrored (the faces are a left-handed cube whose +Z is the camera's default forward,
+// world -Z), scaled by RenderSettings::SkyCubemapIntensity (RayRight.w).
+#include "Resources/DrawIndex.slang"
 #include "Environment/EnvironmentCommon.slang"
+
+#ifndef SKY_CUBEMAP
+#define SKY_CUBEMAP 0
+#endif
+
+#if SKY_CUBEMAP
+[[vk::binding(0, 0)]] TextureCube<float4> SkyCube; // sRGB view: linear on read.
+[[vk::binding(1, 0)]] SamplerState SkySampler;
+#endif
 
 // 128 bytes (the guaranteed push-constant budget). The view ray of an NDC point is
 // Forward + x * Right + y * Up, with Right/Up scaled by the tangents of the half fields
@@ -35,11 +50,10 @@ struct FragmentOutput
 	float4 Color : SV_Target0;
 };
 
-// gl_VertexIndex directly (SV_VulkanVertexID): the fullscreen triangle is drawn from
-// vertex 0, so it equals SV_VertexID without the DrawParameters capability.
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	static const float2 positions[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };
 	VertexOutput output;
 	output.Position = float4(positions[vertexId], 0.0, 1.0);
@@ -63,6 +77,11 @@ FragmentOutput fragmentMain(VertexOutput input)
 {
 	const float3 direction = Constants.RayForward.xyz + input.Ndc.x * Constants.RayRight.xyz + input.Ndc.y * Constants.RayUp.xyz;
 	FragmentOutput output;
+#if SKY_CUBEMAP
+	const float3 d = EnvironmentRotateLookup(normalize(direction), Constants.RayUp.w);
+	output.Color = float4(SkyCube.SampleLevel(SkySampler, float3(d.x, d.y, -d.z), 0.0).rgb * Constants.RayRight.w, 1.0);
+#else
 	output.Color = float4(EvaluateSky(EnvironmentRotateLookup(normalize(direction), Constants.RayUp.w)), 1.0);
+#endif
 	return output;
 }

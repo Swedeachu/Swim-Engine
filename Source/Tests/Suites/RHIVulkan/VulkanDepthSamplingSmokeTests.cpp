@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_DEPTH_SAMPLING_SPIRV_PATH
@@ -22,17 +23,15 @@ namespace
 		using namespace Swim;
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Depth sampling smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const auto parsed = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_DEPTH_SAMPLING_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(parsed.Reflection, SWIM_RHI_DEPTH_SAMPLING_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
-		std::ifstream file(SWIM_RHI_DEPTH_SAMPLING_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_DEPTH_SAMPLING_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -41,8 +40,7 @@ namespace
 		file.read(reinterpret_cast<char*>(bytecode.data()), static_cast<std::streamsize>(bytecode.size()));
 		SWIM_REQUIRE(file);
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
-		auto program = device->CreateShaderProgram({ { &stage, 1 },
-			{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "Depth sampling" });
+		auto program = device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(interface), "Depth sampling" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "Depth sampling layout" });
 		SWIM_REQUIRE(layout);
@@ -183,11 +181,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "DepthSamplingAndComparisonReadback", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunDepthSamplingSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunDepthSamplingSmoke>("DepthSamplingAndComparisonReadback", SWIM_TEST_LOCATION);
 		}
 
 		return true;

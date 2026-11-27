@@ -15,21 +15,14 @@ namespace Swim::ShaderCompiler
 			std::uint32_t Components;
 		};
 		// Exact Slang format qualifiers; never infer image storage format from float4.
-		static constexpr std::array<FormatEntry, 13> formats{{
-			{ "r32f", Rhi::Format::R32Float, "float32", 1 },
-			{ "r32ui", Rhi::Format::R32Uint, "uint32", 1 },
-			{ "r32i", Rhi::Format::R32Sint, "int32", 1 },
-			{ "rgba32f", Rhi::Format::RGBA32Float, "float32", 4 },
-			{ "rgba32ui", Rhi::Format::RGBA32Uint, "uint32", 4 },
-			{ "rgba32i", Rhi::Format::RGBA32Sint, "int32", 4 },
-			{ "rgba16f", Rhi::Format::RGBA16Float, "float32", 4 },
-			{ "rgba16ui", Rhi::Format::RGBA16Uint, "uint32", 4 },
-			{ "rgba16i", Rhi::Format::RGBA16Sint, "int32", 4 },
-			{ "rgba8", Rhi::Format::RGBA8Unorm, "float32", 4 },
-			{ "rgba8_snorm", Rhi::Format::RGBA8Snorm, "float32", 4 },
-			{ "rgba8ui", Rhi::Format::RGBA8Uint, "uint32", 4 },
-			{ "rgba8i", Rhi::Format::RGBA8Sint, "int32", 4 }
-		}};
+		static constexpr std::array<FormatEntry, 14> formats{ { { "r32f", Rhi::Format::R32Float, "float32", 1 },
+			{ "r16f", Rhi::Format::R16Float, "float32", 1 }, // Extended formats (Rhi StorageImageExtendedFormats).
+			{ "r32ui", Rhi::Format::R32Uint, "uint32", 1 }, { "r32i", Rhi::Format::R32Sint, "int32", 1 },
+			{ "rgba32f", Rhi::Format::RGBA32Float, "float32", 4 }, { "rgba32ui", Rhi::Format::RGBA32Uint, "uint32", 4 },
+			{ "rgba32i", Rhi::Format::RGBA32Sint, "int32", 4 }, { "rgba16f", Rhi::Format::RGBA16Float, "float32", 4 },
+			{ "rgba16ui", Rhi::Format::RGBA16Uint, "uint32", 4 }, { "rgba16i", Rhi::Format::RGBA16Sint, "int32", 4 },
+			{ "rgba8", Rhi::Format::RGBA8Unorm, "float32", 4 }, { "rgba8_snorm", Rhi::Format::RGBA8Snorm, "float32", 4 },
+			{ "rgba8ui", Rhi::Format::RGBA8Uint, "uint32", 4 }, { "rgba8i", Rhi::Format::RGBA8Sint, "int32", 4 } } };
 
 		for (const auto& format : formats)
 		{

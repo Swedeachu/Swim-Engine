@@ -9,6 +9,7 @@
 static const uint ForwardViewFlagEnvironment = 1u << 0;
 static const uint ForwardViewFlagShadows = 1u << 1;
 static const uint ForwardViewFlagBrdfLut = 1u << 2;
+static const uint ForwardViewFlagAlphaToCoverage = 1u << 3;
 static const uint ForwardDebugNone = 0;
 static const uint ForwardDebugClusterHeatmap = 1;
 

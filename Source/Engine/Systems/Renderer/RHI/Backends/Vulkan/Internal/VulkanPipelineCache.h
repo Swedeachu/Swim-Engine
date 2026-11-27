@@ -6,6 +6,7 @@
 
 #include <shared_mutex>
 #include <span>
+#include <string_view>
 
 namespace Swim::RhiVulkan
 {
@@ -23,6 +24,10 @@ namespace Swim::RhiVulkan
 	Rhi::PipelineCacheData ExportVulkanPipelineCache(const VulkanDeviceState& state);
 	VkResult CreateCachedVulkanGraphicsPipeline(const VulkanDeviceState& state, const VkGraphicsPipelineCreateInfo& info, VkPipeline& pipeline);
 	VkResult CreateCachedVulkanComputePipeline(const VulkanDeviceState& state, const VkComputePipelineCreateInfo& info, VkPipeline& pipeline);
+
+	// With VulkanDeviceState::PipelineStatisticsEnabled: logs each shader executable's statistics
+	// (registers, instructions, spills, as the driver reports them). Otherwise does nothing.
+	void LogVulkanPipelineStatistics(const VulkanDeviceState& state, VkPipeline pipeline, std::string_view name);
 
 	void DestroyVulkanPipelineCache(const VulkanDeviceState& state) noexcept;
 

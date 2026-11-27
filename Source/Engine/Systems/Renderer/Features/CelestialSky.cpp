@@ -1,6 +1,7 @@
 #include "Engine/Systems/Renderer/Features/CelestialSky.h"
 
 #include "Engine/Math/VectorMath.h"
+#include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
 
 #include <algorithm>
@@ -48,6 +49,38 @@ namespace Engine
 			return { v.x, v.y, v.z, 0.0f };
 		}
 
+		Swim::Render::GraphTexture CopyColor(RenderFeatureContext& context)
+		{
+			using State = Swim::Rhi::ResourceState;
+			auto& graph = context.Graph();
+			const auto source = context.Color();
+			auto desc = graph.GetDesc(source);
+			const auto extent = desc.Extent;
+			desc.Usage = Swim::Rhi::TextureUsage::Sampled | Swim::Rhi::TextureUsage::Storage | Swim::Rhi::TextureUsage::TransferSource |
+				Swim::Rhi::TextureUsage::TransferDestination | Swim::Rhi::TextureUsage::ColorAttachment;
+			desc.DebugName = "Celestial sky";
+			const auto destination = graph.CreateTexture(desc);
+			graph.AddPass(
+				"Celestial sky copy", Swim::Rhi::QueueType::Graphics,
+				[&](Swim::Render::RenderGraphBuilder& b)
+				{
+					b.Read(source, State::CopySource);
+					b.Write(destination, State::CopyDestination);
+				},
+				[source, destination, extent](Swim::Render::RenderCommandContext& c)
+				{
+					Swim::Rhi::TextureCopyRegion region;
+					region.Extent = extent;
+					c.Commands().CopyTexture(c.Get(source), c.Get(destination), region);
+				});
+			return destination;
+		}
+
+		bool HasStorageUse(Swim::Rhi::TextureUsage usage)
+		{
+			return (static_cast<std::uint32_t>(usage) & static_cast<std::uint32_t>(Swim::Rhi::TextureUsage::Storage)) != 0;
+		}
+
 	} // namespace
 
 	void CelestialSky::Record(RenderFeatureContext& context)
@@ -87,6 +120,11 @@ namespace Engine
 		{
 			context.Compute("CelestialSkyBake").Storage("DeepSky", deep).Dispatch(BakeWidth, BakeHeight * 2u);
 			baked = true;
+			graph.OnAbandoned(
+				[this]
+				{
+					baked = false;
+				});
 			bakedWith = bakeProgram;
 		}
 
@@ -192,16 +230,22 @@ namespace Engine
 		params.Size[1] = view.Height;
 
 		const auto buffer = graph.CreateUpload(std::as_bytes(std::span(&params, 1)), "Celestial params", Swim::Rhi::BufferUsage::Storage, 16);
-		const auto output = context.CreateColorTarget("Celestial sky");
+		// Drawn in place over the sky pixels; a colour without storage use is copied first.
+		auto color = context.Color();
+
+		if (!HasStorageUse(graph.GetDesc(color).Usage))
+		{
+			color = CopyColor(context);
+		}
+
 		context.Compute("CelestialSky")
 			.Buffer("Params", buffer)
-			.Texture("Color", context.Color())
 			.Texture("Depth", context.Depth())
 			.Texture("DeepSky", deep)
 			.Sampler("LinearRepeat", "LinearRepeat")
-			.Storage("Output", output)
+			.ReadWriteStorage("Output", color)
 			.Dispatch(view.Width, view.Height);
-		context.SetColor(output);
+		context.SetColor(color);
 	}
 
 } // namespace Engine

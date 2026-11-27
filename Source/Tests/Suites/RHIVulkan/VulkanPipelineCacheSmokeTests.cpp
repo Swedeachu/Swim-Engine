@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Tests/Fixtures/TemporaryPipelineCacheFile.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #include <array>
@@ -48,10 +49,8 @@ namespace
 		using namespace Swim;
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Pipeline cache smoke requires a working SDL desktop video driver");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Pipeline cache smoke requires the full Swim Vulkan baseline and validation");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
-		const auto bytecode = platform.GetFileSystem().ReadFileBlocking(SWIM_RHI_TRIANGLE_SPIRV_PATH);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
+		const auto bytecode = platform.GetFileSystem().ReadFileBlocking(Swim::Testing::SmokeBytecodePath(SWIM_RHI_TRIANGLE_SPIRV_PATH));
 		Testing::TemporaryPipelineCacheFile file;
 		Rhi::PipelineCacheData coldData;
 		const auto coldStart = std::chrono::steady_clock::now();
@@ -91,8 +90,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PipelineCachePersistenceAndReuse", SWIM_TEST_LOCATION,
-				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunPipelineCacheSmoke); } });
+			Swim::Testing::AddSmoke<&RunPipelineCacheSmoke>("PipelineCachePersistenceAndReuse", SWIM_TEST_LOCATION);
 		}
 
 		return true;

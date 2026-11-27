@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraph.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 #ifdef SWIM_RHI_TEXTURE_SPIRV_PATH
@@ -28,7 +29,7 @@ namespace
 
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_TEXTURE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto interface = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto interface = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_TEXTURE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(interface, interface.Error);
 		SWIM_REQUIRE_EQUAL(interface.Interface.DescriptorSchemas.size(), 1u);
 		const auto& schema = interface.Interface.DescriptorSchemas.front();
@@ -49,7 +50,7 @@ namespace
 
 		SWIM_REQUIRE(textureBinding != UINT32_MAX && samplerBinding != UINT32_MAX);
 
-		std::ifstream file(SWIM_RHI_TEXTURE_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_TEXTURE_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -67,16 +68,13 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", bytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytes } } };
-		auto program = device->CreateShaderProgram(
-			{ stages, { interface.Interface.DescriptorSchemas, interface.Interface.PushConstants }, "Graph post" });
+		auto program = device->CreateShaderProgram({ stages, Swim::Testing::SmokeInterfaceDesc(interface.Interface), "Graph post" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "Graph post layout" });
 		SWIM_REQUIRE(layout);
@@ -320,11 +318,7 @@ namespace
 
 		if (enabled && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "RenderGraphOffscreenPostPresentAndReuse", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunRenderGraphSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunRenderGraphSmoke>("RenderGraphOffscreenPostPresentAndReuse", SWIM_TEST_LOCATION);
 		}
 
 		return true;

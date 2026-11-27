@@ -45,15 +45,6 @@ namespace Swim::Render
 				});
 		}
 
-		// One output page's instances: rows [FirstRow, FirstRow + Rows) of the dispatch buffer.
-		struct PageGroup
-		{
-			std::uint32_t Page = 0;
-			std::uint32_t FirstRow = 0;
-			std::uint32_t Rows = 0;
-			std::uint32_t MaxVertices = 0;
-		};
-
 	} // namespace
 
 	SkinningSystem::SkinningSystem(Rhi::Device& deviceInput, GeometryHeap& heapInput, SkinningSystemDesc descInput)
@@ -311,20 +302,42 @@ namespace Swim::Render
 		}
 
 		SkinningGraphResources resources;
-		const std::string& name = desc.DebugName;
+		const auto candidates = CollectCandidates(geometry, resources);
+		std::vector<SkinnedMeshHandle> uploads;
+		meshes->ForEach(
+			[&](SkinnedMeshHandle handle, Mesh& mesh)
+			{
+				if (mesh.Upload == GpuUploadState::PendingUpload)
+				{
+					uploads.push_back(handle);
+				}
+			});
 
-		// Instances to skin this frame, with the page their output lives in.
-		struct Candidate
+		if (candidates.empty() && uploads.empty())
 		{
-			SkinInstanceHandle Handle;
-			Instance* Data = nullptr;
-			const Mesh* Source = nullptr;
-			std::uint32_t Page = 0;
-			std::uint32_t OutputVertex = 0;
-			bool Settle = false;
-		};
+			return resources;
+		}
 
-		std::vector<Candidate> candidates;
+		RecordUploads(graph, resources, uploads);
+		uploading = uploads;
+		resources.UploadedMeshes = static_cast<std::uint32_t>(uploads.size());
+		pending = true;
+
+		if (candidates.empty())
+		{
+			return resources;
+		}
+
+		const SkinBatch batch = PackCandidates(candidates, resources);
+		RecordSkinPass(graph, geometry, batch, resources);
+		return resources;
+	}
+
+	// Instances to skin this frame (posed and dirty or settling, output resident), by page.
+	std::vector<SkinningSystem::SkinCandidate> SkinningSystem::CollectCandidates(
+		const GeometryGraphResources& geometry, SkinningGraphResources& resources)
+	{
+		std::vector<SkinCandidate> candidates;
 		instances->ForEach(
 			[&](SkinInstanceHandle handle, Instance& instance)
 			{
@@ -347,27 +360,17 @@ namespace Swim::Render
 					{ handle, &instance, meshes->Get(instance.Mesh), metadata->VertexPage, metadata->VertexOffset, !instance.Dirty });
 			});
 		std::stable_sort(candidates.begin(), candidates.end(),
-			[](const Candidate& a, const Candidate& b)
+			[](const SkinCandidate& a, const SkinCandidate& b)
 			{
 				return a.Page < b.Page;
 			});
+		return candidates;
+	}
 
-		std::vector<SkinnedMeshHandle> uploads;
-		meshes->ForEach(
-			[&](SkinnedMeshHandle handle, Mesh& mesh)
-			{
-				if (mesh.Upload == GpuUploadState::PendingUpload)
-				{
-					uploads.push_back(handle);
-				}
-
-			});
-
-		if (candidates.empty() && uploads.empty())
-		{
-			return resources;
-		}
-
+	// Imports the source buffers and uploads the meshes added since the last frame.
+	void SkinningSystem::RecordUploads(RenderGraph& graph, SkinningGraphResources& resources, const std::vector<SkinnedMeshHandle>& uploads)
+	{
+		const std::string& name = desc.DebugName;
 		const auto sources = graph.ImportBuffer(*sourceVertices, S::ShaderRead);
 		const auto skins = graph.ImportBuffer(*skinVertices, S::ShaderRead);
 		const auto deltas = graph.ImportBuffer(*morphDeltas, S::ShaderRead);
@@ -391,22 +394,19 @@ namespace Swim::Render
 
 			mesh.Upload = GpuUploadState::Recorded;
 		}
+	}
 
-		uploading = uploads;
-		resources.UploadedMeshes = static_cast<std::uint32_t>(uploads.size());
-		pending = true;
+	// One dispatch row per candidate with its current and previous poses, grouped by page;
+	// marks each instance recorded.
+	SkinningSystem::SkinBatch SkinningSystem::PackCandidates(
+		const std::vector<SkinCandidate>& candidates, SkinningGraphResources& resources)
+	{
+		SkinBatch batch;
+		auto& palettes = batch.Palettes;
+		auto& weights = batch.Weights;
+		auto& groups = batch.Groups;
 
-		if (candidates.empty())
-		{
-			return resources;
-		}
-
-		std::vector<GpuSkinDispatch> rows;
-		std::vector<float> palettes;
-		std::vector<float> weights;
-		std::vector<PageGroup> groups;
-
-		for (const Candidate& candidate : candidates)
+		for (const SkinCandidate& candidate : candidates)
 		{
 			const Mesh& mesh = *candidate.Source;
 			Instance& instance = *candidate.Data;
@@ -438,12 +438,12 @@ namespace Swim::Render
 
 			if (groups.empty() || groups.back().Page != candidate.Page || groups.back().Rows == MaxGroups)
 			{
-				groups.push_back({ candidate.Page, static_cast<std::uint32_t>(rows.size()), 0, 0 });
+				groups.push_back({ candidate.Page, static_cast<std::uint32_t>(batch.Rows.size()), 0, 0 });
 			}
 
 			++groups.back().Rows;
 			groups.back().MaxVertices = std::max(groups.back().MaxVertices, mesh.VertexCount);
-			rows.push_back(row);
+			batch.Rows.push_back(row);
 			resources.Instances.push_back({ candidate.Handle, row, candidate.Page, candidate.Settle });
 
 			if (candidate.Settle)
@@ -466,11 +466,24 @@ namespace Swim::Render
 			weights.assign(4, 0.0f); // Bound but never read.
 		}
 
-		const auto dispatchBuffer = graph.CreateUpload(std::as_bytes(std::span(rows)), name + " dispatches", Rhi::BufferUsage::Storage, 16);
+		return batch;
+	}
+
+	// The batch's buffers and the compute pass skinning every group into its page.
+	void SkinningSystem::RecordSkinPass(
+		RenderGraph& graph, const GeometryGraphResources& geometry, const SkinBatch& batch, SkinningGraphResources& resources) const
+	{
+		const std::string& name = desc.DebugName;
+		const auto& groups = batch.Groups;
+		const auto sources = *resources.SourceVertices;
+		const auto skins = *resources.SkinVertices;
+		const auto deltas = *resources.MorphDeltas;
+		const auto dispatchBuffer =
+			graph.CreateUpload(std::as_bytes(std::span(batch.Rows)), name + " dispatches", Rhi::BufferUsage::Storage, 16);
 		const auto paletteBuffer =
-			graph.CreateUpload(std::as_bytes(std::span(palettes)), name + " palettes", Rhi::BufferUsage::Storage, 16);
+			graph.CreateUpload(std::as_bytes(std::span(batch.Palettes)), name + " palettes", Rhi::BufferUsage::Storage, 16);
 		const auto weightBuffer =
-			graph.CreateUpload(std::as_bytes(std::span(weights)), name + " morph weights", Rhi::BufferUsage::Storage, 16);
+			graph.CreateUpload(std::as_bytes(std::span(batch.Weights)), name + " morph weights", Rhi::BufferUsage::Storage, 16);
 		resources.Dispatches = dispatchBuffer;
 		resources.Palettes = paletteBuffer;
 		resources.MorphWeights = weightBuffer;
@@ -549,7 +562,6 @@ namespace Swim::Render
 				}
 
 			});
-		return resources;
 	}
 
 	void SkinningSystem::CommitFrame()

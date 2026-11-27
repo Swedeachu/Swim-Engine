@@ -306,6 +306,41 @@ namespace Swim::Render
 
 		std::vector<Move> moves;
 		Defragment(moves);
+		// Every move in this graph with the range it moved, so an abandoned graph can hand the
+		// copies on. A range moved in an abandoned graph still has its bytes at the old offset:
+		// a new move of it copies from there, any other is made as it was.
+		std::vector<Carried> recorded;
+		recorded.reserve(moves.size() + carried.size());
+
+		for (auto& move : moves)
+		{
+			const auto index = rangesByOffset.at(move.To);
+			const auto earlier = std::find_if(carried.begin(), carried.end(),
+				[&](const Carried& c)
+				{
+					return c.Range.Index == index && c.Copy.To == move.From;
+				});
+
+			if (earlier != carried.end())
+			{
+				move.From = earlier->Copy.From;
+				carried.erase(earlier);
+			}
+
+			recorded.push_back({ StreamingRange{ index, slots[index].Generation }, move });
+		}
+
+		for (const auto& c : carried)
+		{
+			// Freed since: nothing left to copy.
+			if (IsValid(c.Range) && slots[c.Range.Index].Offset == c.Copy.To)
+			{
+				moves.push_back(c.Copy);
+				recorded.push_back(c);
+			}
+		}
+
+		carried.clear();
 
 		if (!moves.empty())
 		{
@@ -369,6 +404,8 @@ namespace Swim::Render
 			std::vector<std::byte> Bytes;
 			std::uint64_t StagingOffset = 0;
 			std::uint64_t Destination = 0;
+			StreamingRange Range;
+			std::uint64_t Offset = 0;
 		};
 
 		auto chunks = std::make_shared<std::vector<Chunk>>();
@@ -379,7 +416,7 @@ namespace Swim::Render
 			auto write = std::move(pending.front());
 			pending.pop_front();
 			const auto size = write.Bytes.size();
-			chunks->push_back({ std::move(write.Bytes), staged, Get(write.Range).Offset + write.Offset });
+			chunks->push_back({ std::move(write.Bytes), staged, Get(write.Range).Offset + write.Offset, write.Range, write.Offset });
 			staged = AlignUp(staged + size, 16);
 		}
 
@@ -424,6 +461,25 @@ namespace Swim::Render
 			{
 				stats.UploadedBytes += chunk.Bytes.size();
 			}
+		}
+
+		if (!chunks->empty() || !recorded.empty())
+		{
+			graph.OnAbandoned(
+				[this, chunks, recorded = std::move(recorded)]
+				{
+					// Writes back to the front of the queue, in order, unless their range was freed.
+					for (auto chunk = chunks->rbegin(); chunk != chunks->rend(); ++chunk)
+					{
+						if (IsValid(chunk->Range))
+						{
+							stats.PendingUploadBytes += chunk->Bytes.size();
+							pending.push_front({ chunk->Range, chunk->Offset, std::move(chunk->Bytes) });
+						}
+					}
+
+					carried.insert(carried.end(), recorded.begin(), recorded.end());
+				});
 		}
 
 		stats.LargestFreeRange = freeBySize.empty() ? 0 : freeBySize.rbegin()->first;

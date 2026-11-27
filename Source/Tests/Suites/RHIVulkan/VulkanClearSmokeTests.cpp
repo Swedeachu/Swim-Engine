@@ -1,6 +1,7 @@
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
@@ -26,9 +27,7 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE_MESSAGE(window, "RHI smoke could not create a Vulkan window");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "RHI smoke requires an adapter supporting the full Swim Vulkan 1.3 baseline");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -227,7 +226,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClearTransferAndPresent", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunClearAndTransferSmoke); } });
+			Swim::Testing::AddSmoke<&RunClearAndTransferSmoke>("ClearTransferAndPresent", SWIM_TEST_LOCATION);
 		}
 
 		return true;

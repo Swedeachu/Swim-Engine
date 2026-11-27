@@ -181,6 +181,59 @@ namespace Swim::Render
 		return gradient;
 	}
 
+	namespace
+	{
+
+		// The emitter's look: size and colour over life, flipbook, UV rect, material and sprite.
+		void ValidateParticleAppearance(const ParticleEmitterDesc& desc)
+		{
+			ValidateKeys(desc.SizeOverLife.KeyCount, desc.SizeOverLife.Times, "particle size curve");
+			ValidateKeys(desc.ColorOverLife.KeyCount, desc.ColorOverLife.Times, "particle color gradient");
+
+			for (std::uint32_t k = 0; k < desc.SizeOverLife.KeyCount; ++k)
+			{
+				if (!Finite(desc.SizeOverLife.Values[k]) || desc.SizeOverLife.Values[k] < 0.0f)
+				{
+					throw std::invalid_argument("particle size curve values must be finite and non-negative");
+				}
+			}
+
+			for (std::uint32_t k = 0; k < desc.ColorOverLife.KeyCount; ++k)
+			{
+				const auto& color = desc.ColorOverLife.Colors[k];
+
+				if (!AllFinite(color) || color[0] < 0.0f || color[1] < 0.0f || color[2] < 0.0f || color[3] < 0.0f || color[3] > 1.0f)
+				{
+					throw std::invalid_argument("particle colors must be finite and non-negative with alpha in [0, 1]");
+				}
+			}
+
+			if (desc.FlipbookColumns < 1 || desc.FlipbookRows < 1 || desc.FlipbookFrames < 1 ||
+				std::uint64_t(desc.FlipbookFrames) > std::uint64_t(desc.FlipbookColumns) * desc.FlipbookRows ||
+				!Finite(desc.FlipbookFrameRate) || desc.FlipbookFrameRate < 0.0f)
+			{
+				throw std::invalid_argument("particle flipbooks need 1 .. Columns * Rows frames and a non-negative frame rate");
+			}
+
+			if (!AllFinite(desc.UvRect) || desc.UvRect[0] < 0.0f || desc.UvRect[1] < 0.0f || desc.UvRect[2] > 1.0f ||
+				desc.UvRect[3] > 1.0f || !(desc.UvRect[0] < desc.UvRect[2]) || !(desc.UvRect[1] < desc.UvRect[3]))
+			{
+				throw std::invalid_argument("particle UV rects must lie in [0, 1] with u0 < u1 and v0 < v1");
+			}
+
+			if (static_cast<std::uint32_t>(desc.Material) >= ParticleMaterialCount)
+			{
+				throw std::invalid_argument("unknown particle material");
+			}
+
+			if ((desc.TextureIndex == 0) != (desc.SamplerIndex == 0))
+			{
+				throw std::invalid_argument("a particle sprite needs both a texture and a sampler index (or neither)");
+			}
+		}
+
+	} // namespace
+
 	void ValidateParticleEmitterDesc(const ParticleEmitterDesc& desc)
 	{
 		if (desc.Capacity < 1 || (desc.Blend == ParticleBlendMode::AlphaBlend && desc.Capacity > MaxSortedParticles))
@@ -250,49 +303,7 @@ namespace Swim::Render
 			throw std::invalid_argument("particle collision needs world space, a finite ground and restitution/friction in [0, 1]");
 		}
 
-		ValidateKeys(desc.SizeOverLife.KeyCount, desc.SizeOverLife.Times, "particle size curve");
-		ValidateKeys(desc.ColorOverLife.KeyCount, desc.ColorOverLife.Times, "particle color gradient");
-
-		for (std::uint32_t k = 0; k < desc.SizeOverLife.KeyCount; ++k)
-		{
-			if (!Finite(desc.SizeOverLife.Values[k]) || desc.SizeOverLife.Values[k] < 0.0f)
-			{
-				throw std::invalid_argument("particle size curve values must be finite and non-negative");
-			}
-		}
-
-		for (std::uint32_t k = 0; k < desc.ColorOverLife.KeyCount; ++k)
-		{
-			const auto& color = desc.ColorOverLife.Colors[k];
-
-			if (!AllFinite(color) || color[0] < 0.0f || color[1] < 0.0f || color[2] < 0.0f || color[3] < 0.0f || color[3] > 1.0f)
-			{
-				throw std::invalid_argument("particle colors must be finite and non-negative with alpha in [0, 1]");
-			}
-		}
-
-		if (desc.FlipbookColumns < 1 || desc.FlipbookRows < 1 || desc.FlipbookFrames < 1 ||
-			std::uint64_t(desc.FlipbookFrames) > std::uint64_t(desc.FlipbookColumns) * desc.FlipbookRows ||
-			!Finite(desc.FlipbookFrameRate) || desc.FlipbookFrameRate < 0.0f)
-		{
-			throw std::invalid_argument("particle flipbooks need 1 .. Columns * Rows frames and a non-negative frame rate");
-		}
-
-		if (!AllFinite(desc.UvRect) || desc.UvRect[0] < 0.0f || desc.UvRect[1] < 0.0f || desc.UvRect[2] > 1.0f || desc.UvRect[3] > 1.0f ||
-			!(desc.UvRect[0] < desc.UvRect[2]) || !(desc.UvRect[1] < desc.UvRect[3]))
-		{
-			throw std::invalid_argument("particle UV rects must lie in [0, 1] with u0 < u1 and v0 < v1");
-		}
-
-		if (static_cast<std::uint32_t>(desc.Material) >= ParticleMaterialCount)
-		{
-			throw std::invalid_argument("unknown particle material");
-		}
-
-		if ((desc.TextureIndex == 0) != (desc.SamplerIndex == 0))
-		{
-			throw std::invalid_argument("a particle sprite needs both a texture and a sampler index (or neither)");
-		}
+		ValidateParticleAppearance(desc);
 	}
 
 	GpuParticleEmitter PackParticleEmitter(const ParticleEmitterDesc& desc, const std::array<float, 12>& transform, std::uint32_t firstSlot,

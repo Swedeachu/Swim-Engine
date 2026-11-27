@@ -6,6 +6,8 @@
 //  - CullDemoXray (CULL_DEMO_XRAY=1): the transparent pass at the nearest depth, so every
 //    box the culler kept shows through whatever is in front (early list green, late red).
 
+#include "Resources/DrawIndex.slang"
+
 #ifndef CULL_DEMO_DEPTH
 #define CULL_DEMO_DEPTH 0
 #endif
@@ -60,8 +62,10 @@ struct ShadowConstants
 [[vk::push_constant]] ConstantBuffer<ShadowConstants> Constants;
 
 [shader("vertex")]
-float4 vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID) : SV_Position
+float4 vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS) : SV_Position
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	float3 corner;
 	float3 normal;
 	CubeVertex(vertexId, corner, normal);
@@ -81,8 +85,10 @@ struct XrayConstants
 [[vk::push_constant]] ConstantBuffer<XrayConstants> Constants;
 
 [shader("vertex")]
-float4 vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID) : SV_Position
+float4 vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS) : SV_Position
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	float3 corner;
 	float3 normal;
 	CubeVertex(vertexId, corner, normal);
@@ -104,8 +110,10 @@ ForwardTransparentTargets fragmentMain()
 }
 #elif CULL_DEMO_DEPTH
 [shader("vertex")]
-float4 vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID) : SV_Position
+float4 vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS) : SV_Position
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	float3 corner;
 	float3 normal;
 	CubeVertex(vertexId, corner, normal);
@@ -129,8 +137,10 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint boxIndex : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint boxIndexInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint boxIndex = DrawInstanceIndex(boxIndexInput);
 	const Box box = Boxes[boxIndex];
 	float3 corner;
 	float3 normal;

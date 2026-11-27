@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -33,6 +34,31 @@ namespace Swim::Replay
 				rig.Aim = CameraAim::Point;
 				rig.LookAt.Set(0.0, Animation::Add(desc.Point, desc.TargetOffset), Ease::Step);
 			}
+		}
+
+		// An arc of desc.Degrees around centre, one point per 30 degrees or less.
+		void AddOrbitPath(CameraPath& path, const ShotDesc& desc, const Vec3& centre)
+		{
+			path.Kind = PathKind::Centripetal;
+			const int steps = std::max(2, static_cast<int>(std::ceil(std::abs(desc.Degrees) / 30.0f)));
+
+			for (int i = 0; i <= steps; ++i)
+			{
+				const float angle = desc.StartAngle + desc.Degrees * static_cast<float>(i) / static_cast<float>(steps);
+				path.Points.push_back({ Animation::Add(centre, AroundY(angle, desc.Radius, desc.Height)) });
+			}
+
+			path.Invalidate();
+		}
+
+		// A straight move from desc.Radius to desc.EndRadius, the height scaled with the distance.
+		void AddDollyPath(CameraPath& path, const ShotDesc& desc, const Vec3& centre)
+		{
+			path.Kind = PathKind::Linear;
+			path.Points.push_back({ Animation::Add(centre, AroundY(desc.StartAngle, desc.Radius, desc.Height)) });
+			path.Points.push_back({ Animation::Add(
+				centre, AroundY(desc.StartAngle, desc.EndRadius, desc.Height * desc.EndRadius / std::max(desc.Radius, 1.0e-3f))) });
+			path.Invalidate();
 		}
 
 		struct Preset
@@ -135,17 +161,7 @@ namespace Swim::Replay
 		case ShotPreset::Orbit:
 		{
 			followTarget();
-			CameraPath& path = project.EditPath(rigName);
-			path.Kind = PathKind::Centripetal;
-			const int steps = std::max(2, static_cast<int>(std::ceil(std::abs(desc.Degrees) / 30.0f)));
-
-			for (int i = 0; i <= steps; ++i)
-			{
-				const float angle = desc.StartAngle + desc.Degrees * static_cast<float>(i) / static_cast<float>(steps);
-				path.Points.push_back({ Animation::Add(centre, AroundY(angle, desc.Radius, desc.Height)) });
-			}
-
-			path.Invalidate();
+			AddOrbitPath(project.EditPath(rigName), desc, centre);
 			shot.Path = rigName;
 			AimAtTarget(rig, desc);
 			break;
@@ -153,12 +169,7 @@ namespace Swim::Replay
 		case ShotPreset::Dolly:
 		{
 			followTarget();
-			CameraPath& path = project.EditPath(rigName);
-			path.Kind = PathKind::Linear;
-			path.Points.push_back({ Animation::Add(centre, AroundY(desc.StartAngle, desc.Radius, desc.Height)) });
-			path.Points.push_back({ Animation::Add(
-				centre, AroundY(desc.StartAngle, desc.EndRadius, desc.Height * desc.EndRadius / std::max(desc.Radius, 1.0e-3f))) });
-			path.Invalidate();
+			AddDollyPath(project.EditPath(rigName), desc, centre);
 			shot.Path = rigName;
 			AimAtTarget(rig, desc);
 			break;
@@ -401,6 +412,256 @@ namespace Swim::Replay
 				});
 		}
 
+		// The desc's pairs, events and beats with their content times on the recording.
+		struct SyncTargets
+		{
+			std::vector<Anchor> Wanted; // By timeline time.
+			std::vector<double> Events; // Recording times, sorted.
+			std::vector<double> Beats;	// Timeline times, sorted.
+		};
+
+		SyncTargets CollectTargets(const ReplayProject& old, const RegionSyncDesc& d)
+		{
+			SyncTargets targets;
+
+			for (const auto& [beat, event] : d.Pairs)
+			{
+				if (std::isfinite(beat) && std::isfinite(event))
+				{
+					targets.Wanted.push_back({ beat, old.ToRecordingTime(event) });
+				}
+			}
+
+			std::sort(targets.Wanted.begin(), targets.Wanted.end(),
+				[](const Anchor& a, const Anchor& b)
+				{
+					return a.T < b.T;
+				});
+
+			for (const double e : d.Events)
+			{
+				if (std::isfinite(e))
+				{
+					targets.Events.push_back(old.ToRecordingTime(e));
+				}
+			}
+
+			std::sort(targets.Events.begin(), targets.Events.end());
+			targets.Beats.assign(d.Beats.begin(), d.Beats.end());
+			std::sort(targets.Beats.begin(), targets.Beats.end());
+			return targets;
+		}
+
+		struct AnchorFit
+		{
+			std::vector<Anchor> Anchors;
+			std::size_t Dropped = 0;
+		};
+
+		// The region's anchors from (From, r0) to (To, r1): the wanted pairs, or each event on the
+		// nearest beat within MaxShift of its even spot; those out of order are dropped.
+		AnchorFit PickAnchors(const RegionSyncDesc& d, const SyncTargets& targets, double r0, double r1)
+		{
+			AnchorFit fit{ { { d.From, r0 } }, 0 };
+			auto& anchors = fit.Anchors;
+			const auto fits = [&](double t, double r)
+			{
+				return t > anchors.back().T + 0.01 && t < d.To - 0.01 && r > anchors.back().R + 1.0e-6 && r < r1 - 1.0e-6;
+			};
+
+			for (const Anchor& w : targets.Wanted)
+			{
+				if (fits(w.T, w.R))
+				{
+					anchors.push_back(w);
+				}
+				else
+				{
+					++fit.Dropped;
+				}
+			}
+
+			// Events are placed only without wanted pairs.
+			const auto events = targets.Wanted.empty() ? std::span<const double>(targets.Events) : std::span<const double>();
+
+			for (const double r : events)
+			{
+				if (!(r > r0 && r < r1))
+				{
+					continue;
+				}
+
+				const double even = d.From + (r - r0) / (r1 - r0) * (d.To - d.From);
+				double best = 0.0;
+				double bestDistance = std::max(d.MaxShift, 0.0);
+				bool found = false;
+
+				for (const double b : targets.Beats)
+				{
+					if (fits(b, r) && std::abs(b - even) <= bestDistance)
+					{
+						best = b;
+						bestDistance = std::abs(b - even);
+						found = true;
+					}
+				}
+
+				if (found)
+				{
+					anchors.push_back({ best, r });
+				}
+				else
+				{
+					++fit.Dropped;
+				}
+			}
+
+			anchors.push_back({ d.To, r1 });
+			return fit;
+		}
+
+		// Drops anchors that would need a speed outside [minScale, maxScale]; throws when even
+		// the region's two ends do.
+		void DropOutOfRange(AnchorFit& fit, double minScale, double maxScale)
+		{
+			auto& anchors = fit.Anchors;
+
+			for (;;)
+			{
+				std::size_t bad = anchors.size();
+
+				for (std::size_t k = 0; k + 1 < anchors.size(); ++k)
+				{
+					const double mean = (anchors[k + 1].R - anchors[k].R) / (anchors[k + 1].T - anchors[k].T);
+
+					if (mean < minScale || mean > maxScale)
+					{
+						bad = k;
+						break;
+					}
+				}
+
+				if (bad == anchors.size())
+				{
+					return;
+				}
+
+				if (anchors.size() == 2)
+				{
+					const double speed = (anchors[1].R - anchors[0].R) / (anchors[1].T - anchors[0].T);
+					throw std::invalid_argument("the region needs speed " + std::to_string(speed) + ", outside " +
+						std::to_string(minScale) + ".." + std::to_string(maxScale));
+				}
+
+				anchors.erase(anchors.begin() + static_cast<std::ptrdiff_t>(bad + 2 < anchors.size() ? bad + 1 : bad));
+				++fit.Dropped;
+			}
+		}
+
+		std::vector<double> SegmentMeans(const std::vector<Anchor>& anchors)
+		{
+			std::vector<double> means(anchors.size() - 1);
+
+			for (std::size_t k = 0; k < means.size(); ++k)
+			{
+				means[k] = (anchors[k + 1].R - anchors[k].R) / (anchors[k + 1].T - anchors[k].T);
+			}
+
+			return means;
+		}
+
+		// A linear speed curve through the anchors, keeping each segment's mean speed.
+		void WriteSmoothKeys(Track<float>& scale, const std::vector<Anchor>& anchors, const std::vector<double>& means, double speedIn,
+			double speedAfter, double minScale, double to, bool keysAfter)
+		{
+			const std::size_t n = means.size();
+			std::vector<double> v(n + 1);
+			v[0] = speedIn;
+			v[n] = speedAfter;
+
+			for (std::size_t k = 1; k < n; ++k)
+			{
+				v[k] = std::min(means[k - 1], means[k]);
+			}
+
+			double f = 0.5;
+			double m = 0.0;
+
+			// Interior knots never exceed their neighbours' means; the ends give way when
+			// keeping the outside speed cannot fit.
+			if (!SolveSegment(v[0], v[1], means[0], minScale, f, m))
+			{
+				v[0] = std::min(v[0], means[0]);
+			}
+
+			if (!SolveSegment(v[n - 1], v[n], means[n - 1], minScale, f, m))
+			{
+				v[n] = std::min(v[n], means[n - 1]);
+			}
+
+			for (std::size_t k = 0; k < n; ++k)
+			{
+				if (!SolveSegment(v[k], v[k + 1], means[k], minScale, f, m))
+				{
+					f = 0.5;
+					m = 2.0 * means[k] - 0.5 * (v[k] + v[k + 1]);
+				}
+
+				const double span = anchors[k + 1].T - anchors[k].T;
+				scale.Set(anchors[k].T, static_cast<float>(v[k]), Ease::Linear);
+				scale.Set(anchors[k].T + f * span, static_cast<float>(m), Ease::Linear);
+			}
+
+			scale.Set(to, static_cast<float>(v[n]), Ease::Linear);
+
+			if (!keysAfter && std::abs(v[n] - speedAfter) > 1.0e-6)
+			{
+				scale.Set(to + 0.5, static_cast<float>(speedAfter), Ease::Linear);
+			}
+		}
+
+		// Each segment's mean speed, held to the next anchor.
+		void WriteStepKeys(Track<float>& scale, const std::vector<Anchor>& anchors, const std::vector<double>& means, double speedAfter,
+			double to, bool keysAfter)
+		{
+			for (std::size_t k = 0; k < means.size(); ++k)
+			{
+				scale.Set(anchors[k].T, static_cast<float>(means[k]), Ease::Step);
+			}
+
+			scale.Set(to, static_cast<float>(speedAfter), keysAfter ? Ease::Linear : Ease::Step);
+		}
+
+		double MaxAnchorError(const ReplayProject& project, const std::vector<std::pair<double, double>>& anchors)
+		{
+			double error = 0.0;
+
+			for (const auto& [t, r] : anchors)
+			{
+				error = std::max(error, std::abs(project.ToRecordingTime(t) - r));
+			}
+
+			return error;
+		}
+
+		// Markers of the kind within [From, contentEnd] move with the content they marked.
+		void RetimeMarkers(ReplayProject& project, const ReplayProject& old, const RegionSyncDesc& d, double contentEnd)
+		{
+			for (ReplayMarker& marker : project.Markers)
+			{
+				if (marker.Kind == d.RetimeMarkerKind && marker.Time >= d.From && marker.Time <= contentEnd)
+				{
+					marker.Time = TimelineAt(project, old.ToRecordingTime(marker.Time), d.From, d.To);
+				}
+			}
+
+			std::stable_sort(project.Markers.begin(), project.Markers.end(),
+				[](const ReplayMarker& a, const ReplayMarker& b)
+				{
+					return a.Time < b.Time;
+				});
+		}
+
 	} // namespace
 
 	RegionSyncResult SyncRegion(ReplayProject& project, const RegionSyncDesc& d, double recordingLength)
@@ -424,35 +685,7 @@ namespace Swim::Replay
 			{
 				return k.Time > d.To + 0.5 + Track<float>::Epsilon;
 			});
-
-		std::vector<Anchor> wanted;
-
-		for (const auto& [beat, event] : d.Pairs)
-		{
-			if (std::isfinite(beat) && std::isfinite(event))
-			{
-				wanted.push_back({ beat, old.ToRecordingTime(event) });
-			}
-		}
-
-		std::sort(wanted.begin(), wanted.end(),
-			[](const Anchor& a, const Anchor& b)
-			{
-				return a.T < b.T;
-			});
-		std::vector<double> events;
-
-		for (const double e : d.Events)
-		{
-			if (std::isfinite(e))
-			{
-				events.push_back(old.ToRecordingTime(e));
-			}
-		}
-
-		std::sort(events.begin(), events.end());
-		std::vector<double> beats(d.Beats.begin(), d.Beats.end());
-		std::sort(beats.begin(), beats.end());
+		const auto targets = CollectTargets(old, d);
 
 		if (wasEmpty && d.From > Track<float>::Epsilon)
 		{
@@ -480,159 +713,19 @@ namespace Swim::Replay
 				throw std::invalid_argument("the content must move forward over the region (contentTo after from)");
 			}
 
-			std::vector<Anchor> anchors{ { d.From, r0 } };
-			std::size_t dropped = 0;
-			const auto fits = [&](double t, double r)
-			{
-				return t > anchors.back().T + 0.01 && t < d.To - 0.01 && r > anchors.back().R + 1.0e-6 && r < r1 - 1.0e-6;
-			};
-
-			if (!wanted.empty())
-			{
-				for (const Anchor& w : wanted)
-				{
-					if (fits(w.T, w.R))
-					{
-						anchors.push_back(w);
-					}
-					else
-					{
-						++dropped;
-					}
-				}
-			}
-			else
-			{
-				for (const double r : events)
-				{
-					if (!(r > r0 && r < r1))
-					{
-						continue;
-					}
-
-					const double even = d.From + (r - r0) / (r1 - r0) * (d.To - d.From);
-					double best = 0.0;
-					double bestDistance = std::max(d.MaxShift, 0.0);
-					bool found = false;
-
-					for (const double b : beats)
-					{
-						if (fits(b, r) && std::abs(b - even) <= bestDistance)
-						{
-							best = b;
-							bestDistance = std::abs(b - even);
-							found = true;
-						}
-					}
-
-					if (found)
-					{
-						anchors.push_back({ best, r });
-					}
-					else
-					{
-						++dropped;
-					}
-				}
-			}
-
-			anchors.push_back({ d.To, r1 });
-
-			// Anchors that would need a speed outside the range are dropped.
-			for (;;)
-			{
-				std::size_t bad = anchors.size();
-
-				for (std::size_t k = 0; k + 1 < anchors.size(); ++k)
-				{
-					const double mean = (anchors[k + 1].R - anchors[k].R) / (anchors[k + 1].T - anchors[k].T);
-
-					if (mean < minScale || mean > maxScale)
-					{
-						bad = k;
-						break;
-					}
-				}
-
-				if (bad == anchors.size())
-				{
-					break;
-				}
-
-				if (anchors.size() == 2)
-				{
-					throw std::invalid_argument("the region needs speed " + std::to_string((r1 - r0) / (d.To - d.From)) + ", outside " +
-						std::to_string(minScale) + ".." + std::to_string(maxScale));
-				}
-
-				anchors.erase(anchors.begin() + static_cast<std::ptrdiff_t>(bad + 2 < anchors.size() ? bad + 1 : bad));
-				++dropped;
-			}
-
-			const std::size_t n = anchors.size() - 1;
-			std::vector<double> means(n);
-
-			for (std::size_t k = 0; k < n; ++k)
-			{
-				means[k] = (anchors[k + 1].R - anchors[k].R) / (anchors[k + 1].T - anchors[k].T);
-			}
-
+			auto fit = PickAnchors(d, targets, r0, r1);
+			DropOutOfRange(fit, minScale, maxScale);
+			const auto& anchors = fit.Anchors;
+			const auto means = SegmentMeans(anchors);
 			EraseKeys(project.TimeScale, d.From, keysAfter ? d.To : d.To + 0.5);
 
 			if (d.Smooth)
 			{
-				std::vector<double> v(n + 1);
-				v[0] = speedIn;
-				v[n] = speedAfter;
-
-				for (std::size_t k = 1; k < n; ++k)
-				{
-					v[k] = std::min(means[k - 1], means[k]);
-				}
-
-				double f = 0.5;
-				double m = 0.0;
-
-				// Interior knots never exceed their neighbours' means; the ends give way when
-				// keeping the outside speed cannot fit.
-				if (!SolveSegment(v[0], v[1], means[0], minScale, f, m))
-				{
-					v[0] = std::min(v[0], means[0]);
-				}
-
-				if (!SolveSegment(v[n - 1], v[n], means[n - 1], minScale, f, m))
-				{
-					v[n] = std::min(v[n], means[n - 1]);
-				}
-
-				for (std::size_t k = 0; k < n; ++k)
-				{
-					if (!SolveSegment(v[k], v[k + 1], means[k], minScale, f, m))
-					{
-						f = 0.5;
-						m = 2.0 * means[k] - 0.5 * (v[k] + v[k + 1]);
-					}
-
-					const double span = anchors[k + 1].T - anchors[k].T;
-					project.TimeScale.Set(anchors[k].T, static_cast<float>(v[k]), Ease::Linear);
-					project.TimeScale.Set(anchors[k].T + f * span, static_cast<float>(m), Ease::Linear);
-				}
-
-				project.TimeScale.Set(d.To, static_cast<float>(v[n]), Ease::Linear);
-
-				if (!keysAfter && std::abs(v[n] - speedAfter) > 1.0e-6)
-				{
-					project.TimeScale.Set(d.To + 0.5, static_cast<float>(speedAfter), Ease::Linear);
-				}
+				WriteSmoothKeys(project.TimeScale, anchors, means, speedIn, speedAfter, minScale, d.To, keysAfter);
 			}
 			else
 			{
-				for (std::size_t k = 0; k < n; ++k)
-				{
-					project.TimeScale.Set(anchors[k].T, static_cast<float>(means[k]), Ease::Step);
-				}
-
-				project.TimeScale.Set(d.To, static_cast<float>(speedAfter), keysAfter ? Ease::Linear : Ease::Step);
+				WriteStepKeys(project.TimeScale, anchors, means, speedAfter, d.To, keysAfter);
 			}
 
 			project.BakeTimeScale(recordingLength);
@@ -643,7 +736,7 @@ namespace Swim::Replay
 				result.Anchors.emplace_back(a.T, a.R);
 			}
 
-			result.Dropped = dropped;
+			result.Dropped = fit.Dropped;
 			result.MinSpeed = static_cast<float>(*std::min_element(means.begin(), means.end()));
 			result.MaxSpeed = static_cast<float>(*std::max_element(means.begin(), means.end()));
 			const double measured = project.ToRecordingTime(d.From);
@@ -656,28 +749,11 @@ namespace Swim::Replay
 			r0 = measured;
 		}
 
-		result.MaxError = 0.0;
-
-		for (const auto& [t, r] : result.Anchors)
-		{
-			result.MaxError = std::max(result.MaxError, std::abs(project.ToRecordingTime(t) - r));
-		}
+		result.MaxError = MaxAnchorError(project, result.Anchors);
 
 		if (!d.RetimeMarkerKind.empty())
 		{
-			for (ReplayMarker& marker : project.Markers)
-			{
-				if (marker.Kind == d.RetimeMarkerKind && marker.Time >= d.From && marker.Time <= contentEnd)
-				{
-					marker.Time = TimelineAt(project, old.ToRecordingTime(marker.Time), d.From, d.To);
-				}
-			}
-
-			std::stable_sort(project.Markers.begin(), project.Markers.end(),
-				[](const ReplayMarker& a, const ReplayMarker& b)
-				{
-					return a.Time < b.Time;
-				});
+			RetimeMarkers(project, old, d, contentEnd);
 		}
 
 		return result;

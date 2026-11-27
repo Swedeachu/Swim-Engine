@@ -6,6 +6,8 @@
 
 #include <volk.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 
@@ -67,6 +69,10 @@ namespace Swim::RhiVulkan
 
 			void WaitIdle() override;
 
+			// Signals a progress timeline on every submission, so released resources can wait
+			// for the GPU (VulkanDeferredReleases). Real devices only.
+			void EnableProgress();
+
 		private:
 
 			std::shared_ptr<VulkanDeviceState> state;
@@ -74,6 +80,10 @@ namespace Swim::RhiVulkan
 			VkQueue queue = VK_NULL_HANDLE;
 			std::uint32_t familyIndex = 0;
 			std::shared_ptr<std::mutex> submissionMutex;
+			// Orders progress values with the submissions that signal them.
+			std::mutex progressMutex;
+			std::size_t progressIndex = SIZE_MAX;
+			VkSemaphore progressTimeline = VK_NULL_HANDLE;
 
 		};
 

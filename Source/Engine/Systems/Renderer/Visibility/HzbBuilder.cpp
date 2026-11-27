@@ -7,9 +7,42 @@
 #include <array>
 #include <bit>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace Swim::Render
 {
+
+	namespace
+	{
+
+		void ValidateSource(const Rhi::TextureDesc& depthDesc, bool depthFormat, const std::string& name)
+		{
+			if (depthDesc.Dimension != Rhi::TextureDimension::Texture2D || depthDesc.ArrayLayers != 1 ||
+				depthDesc.Samples != Rhi::SampleCount::X1 || (!depthFormat && depthDesc.PixelFormat != Rhi::Format::R32Float) ||
+				(static_cast<std::uint32_t>(depthDesc.Usage) & static_cast<std::uint32_t>(Rhi::TextureUsage::Sampled)) == 0)
+			{
+				throw std::invalid_argument(name + " source must be a sampled single-sample 2D depth or R32Float texture");
+			}
+		}
+
+		// Mips round up (odd edges are kept) while image mips round down: when the two chains
+		// differ, the image is padded to powers of two so every mip holds its rounded-up size.
+		std::pair<std::uint32_t, std::uint32_t> PyramidSize(const std::vector<HzbExtent>& mips)
+		{
+			for (std::uint32_t mip = 0; mip < mips.size(); ++mip)
+			{
+				if (std::max(mips[0].Width >> mip, 1u) != mips[mip].Width || std::max(mips[0].Height >> mip, 1u) != mips[mip].Height)
+				{
+					return { std::bit_ceil(mips[0].Width), std::bit_ceil(mips[0].Height) };
+				}
+			}
+
+			return { mips[0].Width, mips[0].Height };
+		}
+
+	} // namespace
 
 	HzbBuilder::HzbBuilder(HzbBuilderDesc desc)
 		: pipeline(desc.ReducePipeline), layout(desc.Layout), space(desc.Space), name(std::move(desc.DebugName))
@@ -26,12 +59,7 @@ namespace Swim::Render
 		const auto depthDesc = graph.GetDesc(depth); // A copy: creating the pyramid may reallocate the graph's resource list.
 		const bool depthFormat = Rhi::IsDepthFormat(depthDesc.PixelFormat);
 
-		if (depthDesc.Dimension != Rhi::TextureDimension::Texture2D || depthDesc.ArrayLayers != 1 ||
-			depthDesc.Samples != Rhi::SampleCount::X1 || (!depthFormat && depthDesc.PixelFormat != Rhi::Format::R32Float) ||
-			(static_cast<std::uint32_t>(depthDesc.Usage) & static_cast<std::uint32_t>(Rhi::TextureUsage::Sampled)) == 0)
-		{
-			throw std::invalid_argument(name + " source must be a sampled single-sample 2D depth or R32Float texture");
-		}
+		ValidateSource(depthDesc, depthFormat, name);
 
 		const auto mips = ComputeHzbMips(depthDesc.Extent.Width, depthDesc.Extent.Height);
 
@@ -46,19 +74,8 @@ namespace Swim::Render
 		hzb.MipCount = static_cast<std::uint32_t>(mips.size());
 		hzb.Convention = convention;
 		Rhi::TextureDesc pyramidDesc;
-		pyramidDesc.Extent = { mips[0].Width, mips[0].Height, 1 };
-
-		// Mips round up (odd edges are kept) while image mips round down: when the two chains
-		// differ, the image is padded to powers of two so every mip holds its rounded-up size.
-		for (std::uint32_t mip = 0; mip < mips.size(); ++mip)
-		{
-			if (std::max(mips[0].Width >> mip, 1u) != mips[mip].Width || std::max(mips[0].Height >> mip, 1u) != mips[mip].Height)
-			{
-				pyramidDesc.Extent = { std::bit_ceil(mips[0].Width), std::bit_ceil(mips[0].Height), 1 };
-				break;
-			}
-		}
-
+		const auto [pyramidWidth, pyramidHeight] = PyramidSize(mips);
+		pyramidDesc.Extent = { pyramidWidth, pyramidHeight, 1 };
 		pyramidDesc.PixelFormat = Rhi::Format::R32Float;
 		pyramidDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage | Rhi::TextureUsage::TransferSource;
 		pyramidDesc.MipLevels = hzb.MipCount;

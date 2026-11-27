@@ -184,37 +184,7 @@ namespace Swim::Text
 			return result;
 		}
 
-		std::uint32_t pageIndex = 0;
-		std::uint32_t x = 1;
-		std::uint32_t y = 1;
-		std::uint32_t rowHeight = 0;
-
-		for (; pageIndex < pages.size(); ++pageIndex)
-		{
-			const auto& page = pages[pageIndex];
-
-			if (page.Format != format)
-			{
-				continue;
-			}
-
-			x = page.X;
-			y = page.Y;
-			rowHeight = page.RowHeight;
-
-			if (x + bitmap.Width + 1 > desc.PageSize)
-			{
-				x = 1;
-				y += rowHeight + 1;
-				rowHeight = 0;
-			}
-
-			if (y + bitmap.Height + 1 <= desc.PageSize)
-			{
-				break;
-			}
-		}
-
+		auto [pageIndex, x, y, rowHeight] = FindShelf(format, bitmap.Width, bitmap.Height);
 		const bool newPage = pageIndex == pages.size();
 
 		if (newPage)
@@ -267,6 +237,44 @@ namespace Swim::Text
 		page.Writes.push_back({ y, bitmap.Height });
 		++page.Revision;
 		return result;
+	}
+
+	// The first page of format with room for a width x height glyph on its current or next
+	// shelf (page index == pages.size() when none has room).
+	GlyphAtlas::Shelf GlyphAtlas::FindShelf(AtlasPageFormat format, std::uint32_t width, std::uint32_t height) const
+	{
+		std::uint32_t pageIndex = 0;
+		std::uint32_t x = 1;
+		std::uint32_t y = 1;
+		std::uint32_t rowHeight = 0;
+
+		for (; pageIndex < pages.size(); ++pageIndex)
+		{
+			const auto& page = pages[pageIndex];
+
+			if (page.Format != format)
+			{
+				continue;
+			}
+
+			x = page.X;
+			y = page.Y;
+			rowHeight = page.RowHeight;
+
+			if (x + width + 1 > desc.PageSize)
+			{
+				x = 1;
+				y += rowHeight + 1;
+				rowHeight = 0;
+			}
+
+			if (y + height + 1 <= desc.PageSize)
+			{
+				break;
+			}
+		}
+
+		return { pageIndex, x, y, rowHeight };
 	}
 
 	AtlasPageView GlyphAtlas::GetPage(std::uint32_t index) const

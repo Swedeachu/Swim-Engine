@@ -8,6 +8,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Tests/Fixtures/ClusterFixture.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_CLUSTER_LIGHT_CULL_SPIRV_PATH) && defined(SWIM_CLUSTER_BOUNDS_SPIRV_PATH) && defined(SWIM_CLUSTER_ASSIGN_SPIRV_PATH) &&   \
@@ -67,9 +68,9 @@ namespace
 		using namespace Swim;
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(reflectionPath);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, reflectionPath);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
-		std::ifstream file(spirvPath, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(spirvPath), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytes(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -78,8 +79,7 @@ namespace
 		const auto& programInterface = converted.Interface;
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytes };
 		ComputeProgram program;
-		program.Program = device.CreateShaderProgram({ { &stage, 1 },
-			{ programInterface.DescriptorSchemas, programInterface.PushConstants, programInterface.ComputeThreadGroupSize }, label });
+		program.Program = device.CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(programInterface), label });
 		SWIM_REQUIRE(program.Program);
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), label });
 		SWIM_REQUIRE(program.Layout);
@@ -117,9 +117,7 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Clustered lighting smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -488,11 +486,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClusteredLightingMatchesTheCpuReference", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunClusteredLightingSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunClusteredLightingSmoke>("ClusteredLightingMatchesTheCpuReference", SWIM_TEST_LOCATION);
 		}
 
 		return true;

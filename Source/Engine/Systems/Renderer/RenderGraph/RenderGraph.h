@@ -2,6 +2,9 @@
 #include "Engine/Systems/Renderer/RenderGraph/CompiledRenderGraph.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphBuilder.h"
 
+#include <functional>
+#include <vector>
+
 namespace Swim::Render
 {
 
@@ -75,7 +78,7 @@ namespace Swim::Render
 
 		// Convenience: copies bytes into the compiled definition at declaration.
 		GraphBuffer CreateUpload(std::span<const std::byte> bytes, std::string_view name,
-			Rhi::BufferUsage usage = Rhi::BufferUsage::TransferSource, std::uint64_t alignment = 4);
+			Rhi::BufferUsage usage = Rhi::BufferUsage::TransferSource, std::uint64_t alignment = 4, std::uint64_t elementStride = 0);
 
 		// Host-read staging, implicitly exported to HostRead.
 		GraphBuffer CreateReadback(const GraphReadbackDesc& desc);
@@ -100,12 +103,27 @@ namespace Swim::Render
 		// graph is empty afterwards and is not used again.
 		CompiledRenderGraph Compile(RenderGraphCompileCache& cache);
 
+		// Unique for every graph, unlike its address (a frame's graph often lands in the stack
+		// slot of the last one): the key for caching handles imported into one graph.
+		std::uint64_t GetId() const { return id; }
+
+		// Runs if the graph is abandoned instead of executed (a frame that failed while it was
+		// built or recorded). Importers that changed their own state while recording - a
+		// placeholder fill or an upload counted as done, a history marked written - put it back
+		// here, so the next graph imports what is really on the GPU.
+		void OnAbandoned(std::function<void()> undo);
+
+		// The owner's call when the graph will not execute: runs the OnAbandoned callbacks once,
+		// newest first.
+		void Abandon();
+
 	  private:
 
 		void ExportResource(std::uint64_t graph, std::uint32_t index, GraphKind kind, Rhi::ResourceState final);
 
 		Internal::GraphDefinition definition;
-
+		std::uint64_t id = 0; // definition.Id, kept when Compile moves the definition out.
+		std::vector<std::function<void()>> abandoned;
 	};
 
 } // namespace Swim::Render

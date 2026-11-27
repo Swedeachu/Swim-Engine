@@ -134,6 +134,19 @@ namespace Swim::RhiVulkan
 				completionFence = fence->GetFence();
 			}
 
+			std::unique_lock progressLock(progressMutex, std::defer_lock);
+
+			if (progressTimeline != VK_NULL_HANDLE)
+			{
+				progressLock.lock();
+				VkSemaphoreSubmitInfo progressInfo{};
+				progressInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+				progressInfo.semaphore = progressTimeline;
+				progressInfo.value = state->Deferred->Next(progressIndex);
+				progressInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+				signalInfos.push_back(progressInfo);
+			}
+
 			auto submit = [state = state, queue = queue, mutex = submissionMutex, commandInfos = std::move(commandInfos),
 							  waitInfos = std::move(waitInfos), signalInfos = std::move(signalInfos), completionFence]
 			{
@@ -165,10 +178,17 @@ namespace Swim::RhiVulkan
 				submit();
 			}
 
+			if (progressLock.owns_lock())
+			{
+				progressLock.unlock();
+			}
+
 			for (Rhi::CommandList* commandList : desc.CommandLists)
 			{
 				static_cast<VulkanCommandList*>(commandList)->MarkSubmitted();
 			}
+
+			state->Deferred->Collect();
 		}
 
 		void VulkanQueue::WaitIdle()
@@ -182,6 +202,51 @@ namespace Swim::RhiVulkan
 			{
 				throw std::runtime_error("Failed waiting for Vulkan queue idle");
 			}
+
+			// Presents issued through the graphics queue run on a presentation queue of its own
+			// when the device has one; idle covers them too, so their wait semaphores are free.
+			if (type == Rhi::QueueType::Graphics && state->PresentationQueue != VK_NULL_HANDLE && state->PresentationQueueMutex)
+			{
+				std::scoped_lock presentLock(*state->PresentationQueueMutex);
+
+				if (CheckVulkanResult(
+						*state, state->Dispatch.vkQueueWaitIdle(state->PresentationQueue), "vkQueueWaitIdle (presentation)") != VK_SUCCESS)
+				{
+					throw std::runtime_error("Failed waiting for Vulkan presentation queue idle");
+				}
+			}
+
+			if (progressTimeline != VK_NULL_HANDLE)
+			{
+				state->Deferred->Idle(progressIndex);
+			}
+		}
+
+		void VulkanQueue::EnableProgress()
+		{
+			if (progressTimeline != VK_NULL_HANDLE)
+			{
+				return;
+			}
+
+			VkSemaphoreTypeCreateInfo typeInfo{};
+			typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+			typeInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+			VkSemaphoreCreateInfo createInfo{};
+			createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+			createInfo.pNext = &typeInfo;
+			VkSemaphore timeline = VK_NULL_HANDLE;
+
+			if (CheckVulkanResult(*state, state->Dispatch.vkCreateSemaphore(state->Device.device, &createInfo, nullptr, &timeline),
+					"vkCreateSemaphore (queue progress)") != VK_SUCCESS)
+			{
+				return; // Releases stay immediate for this queue's work.
+			}
+
+			SetVulkanObjectName(*state, VK_OBJECT_TYPE_SEMAPHORE, ToNativeHandle(timeline), "Swim queue progress");
+			progressIndex = state->Deferred->Register(state->Device.device, state->Dispatch.vkGetSemaphoreCounterValue,
+				state->Dispatch.vkDestroySemaphore, timeline, type == Rhi::QueueType::Graphics);
+			progressTimeline = timeline;
 		}
 
 } // namespace Swim::RhiVulkan

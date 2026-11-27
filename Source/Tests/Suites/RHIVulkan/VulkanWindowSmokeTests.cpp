@@ -1,6 +1,7 @@
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
@@ -48,9 +49,7 @@ namespace
 		desc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(desc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Window smoke requires the full Swim Vulkan 1.3 baseline");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -264,8 +263,8 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "HdrNegotiationResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunHdrWindowLifecycleSmoke); } });
-			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunWindowLifecycleSmoke); } });
+			Swim::Testing::AddSmoke<&RunHdrWindowLifecycleSmoke>("HdrNegotiationResizeMinimizeRestore", SWIM_TEST_LOCATION);
+			Swim::Testing::AddSmoke<&RunWindowLifecycleSmoke>("ResizeMinimizeRestore", SWIM_TEST_LOCATION);
 		}
 
 		return true;

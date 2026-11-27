@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #include <array>
@@ -17,9 +18,7 @@ namespace
 		using namespace Swim;
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Timestamp smoke requires a working SDL desktop video driver");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Timestamp smoke requires the full Swim Vulkan baseline and validation");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		unsigned testedQueues = 0;
@@ -130,8 +129,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TimestampReadbackAndReuse", SWIM_TEST_LOCATION,
-				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunTimestampSmoke); } });
+			Swim::Testing::AddSmoke<&RunTimestampSmoke>("TimestampReadbackAndReuse", SWIM_TEST_LOCATION);
 		}
 
 		return true;

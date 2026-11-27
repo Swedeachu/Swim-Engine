@@ -41,7 +41,12 @@ namespace Swim::RhiVulkan
 
 				if (ownsView && view != VK_NULL_HANDLE)
 				{
-					state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
+					// Frames still in flight may use it: released once the GPU passes them.
+					state->Deferred->Release(
+						[state = state.get(), view = view]
+						{
+							state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
+						});
 				}
 			}
 

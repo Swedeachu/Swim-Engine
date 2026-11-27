@@ -177,6 +177,68 @@ namespace Swim::UI
 			-(view[2] * t.X + view[6] * t.Y + view[10] * t.Z) };
 	}
 
+	namespace
+	{
+
+		// The billboard's axes for its mode: toCamera runs from the anchor to the camera.
+		void BillboardAxes(
+			const UiWorldPlacement& p, const UiVec3& toCamera, const UiMatrix4& view, UiVec3& right, UiVec3& up, UiVec3& front)
+		{
+			const UiVec3 cameraRight = ViewRow(view, 0);
+			const UiVec3 cameraUp = ViewRow(view, 1);
+			const UiVec3 cameraBack = ViewRow(view, 2);
+			const UiVec3 axis = *Normalize(p.UpAxis);
+
+			switch (p.Billboard)
+			{
+			case UiBillboardMode::ScreenAligned:
+				right = cameraRight;
+				up = cameraUp;
+				front = cameraBack;
+				break;
+			case UiBillboardMode::Cylindrical:
+			{
+				auto flat = Normalize(Sub(toCamera, Scale(axis, Dot(toCamera, axis))));
+
+				if (!flat)
+				{
+					flat = Normalize(Sub(cameraBack, Scale(axis, Dot(cameraBack, axis)))); // Camera on the axis.
+				}
+
+				front = flat.value_or(cameraBack);
+				up = axis;
+				right = Normalize(Cross(up, front)).value_or(cameraRight);
+				break;
+			}
+			default:
+			{
+				front = Normalize(toCamera).value_or(cameraBack);
+				auto side = Normalize(Cross(axis, front));
+				right = side ? *side : cameraRight; // Looking straight along the up axis.
+				up = Cross(front, right);
+				break;
+			}
+			}
+		}
+
+		// World units per canvas pixel that keep the canvas a constant size on screen.
+		float ConstantScreenScale(const UiWorldPlacement& p, const UiCameraView& camera, const UiVec3& anchor)
+		{
+			const auto& view = camera.View;
+			const auto& proj = camera.Projection;
+			const auto viewPosition = Apply(view, { anchor.X, anchor.Y, anchor.Z, 1.0f });
+			const float w = proj[12] * viewPosition[0] + proj[13] * viewPosition[1] + proj[14] * viewPosition[2] + proj[15];
+
+			if (!(std::abs(proj[5]) > 1e-12f) || !(w > 0.0f))
+			{
+				throw std::invalid_argument("Constant-size UI billboards need a valid projection and an anchor in front of the camera");
+			}
+
+			return p.ScreenPixelsPerCanvasPixel * 2.0f * w / (std::abs(proj[5]) * camera.ViewportHeight);
+		}
+
+	} // namespace
+
 	UiMatrix3x4 CanvasToWorld(UiCanvasMode mode, const UiWorldPlacement& p, UiPoint size, const UiCameraView* camera)
 	{
 		ValidatePlacement(p);
@@ -219,55 +281,12 @@ namespace Swim::UI
 
 			ValidateCamera(*camera);
 			const auto& view = camera->View;
-			const UiVec3 cameraRight = ViewRow(view, 0);
-			const UiVec3 cameraUp = ViewRow(view, 1);
-			const UiVec3 cameraBack = ViewRow(view, 2);
 			const UiVec3 toCamera = Sub(CameraPosition(view), anchor);
-			const UiVec3 axis = *Normalize(p.UpAxis);
-
-			switch (p.Billboard)
-			{
-			case UiBillboardMode::ScreenAligned:
-				right = cameraRight;
-				up = cameraUp;
-				front = cameraBack;
-				break;
-			case UiBillboardMode::Cylindrical:
-			{
-				auto flat = Normalize(Sub(toCamera, Scale(axis, Dot(toCamera, axis))));
-
-				if (!flat)
-				{
-					flat = Normalize(Sub(cameraBack, Scale(axis, Dot(cameraBack, axis)))); // Camera on the axis.
-				}
-
-				front = flat.value_or(cameraBack);
-				up = axis;
-				right = Normalize(Cross(up, front)).value_or(cameraRight);
-				break;
-			}
-			default:
-			{
-				front = Normalize(toCamera).value_or(cameraBack);
-				auto side = Normalize(Cross(axis, front));
-				right = side ? *side : cameraRight; // Looking straight along the up axis.
-				up = Cross(front, right);
-				break;
-			}
-			}
+			BillboardAxes(p, toCamera, view, right, up, front);
 
 			if (p.ConstantScreenSize)
 			{
-				const auto& proj = camera->Projection;
-				const auto viewPosition = Apply(view, { anchor.X, anchor.Y, anchor.Z, 1.0f });
-				const float w = proj[12] * viewPosition[0] + proj[13] * viewPosition[1] + proj[14] * viewPosition[2] + proj[15];
-
-				if (!(std::abs(proj[5]) > 1e-12f) || !(w > 0.0f))
-				{
-					throw std::invalid_argument("Constant-size UI billboards need a valid projection and an anchor in front of the camera");
-				}
-
-				scale = p.ScreenPixelsPerCanvasPixel * 2.0f * w / (std::abs(proj[5]) * camera->ViewportHeight);
+				scale = ConstantScreenScale(p, *camera, anchor);
 			}
 		}
 

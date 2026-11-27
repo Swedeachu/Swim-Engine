@@ -100,6 +100,211 @@ namespace Swim::UI
 			return true;
 		}
 
+		// A flow child being placed: Slot is its index in ArrangeChildren's `placed`, which
+		// keeps paint/tab order equal to child order.
+		struct FlowItem
+		{
+			const UiStyle* Style = nullptr;
+			UiRect Rect;
+			std::size_t Slot = 0;
+		};
+
+		// Anchored placement relative to the content box.
+		UiRect AnchoredRect(const UiStyle& cs, const UiRect& inner, float width, float height)
+		{
+			UiRect rect{ 0, 0, width, height };
+
+			if (cs.AnchorMax.X > cs.AnchorMin.X)
+			{
+				rect.Width = std::clamp(
+					(cs.AnchorMax.X - cs.AnchorMin.X) * inner.Width - cs.Margin.Left - cs.Margin.Right, cs.MinSize.X, cs.MaxSize.X);
+				rect.X = cs.AnchorMin.X * inner.Width + cs.Margin.Left + cs.Offset.X;
+			}
+			else
+			{
+				rect.X = cs.AnchorMin.X * inner.Width + cs.Offset.X + cs.Margin.Left - cs.Pivot.X * rect.Width;
+			}
+
+			if (cs.AnchorMax.Y > cs.AnchorMin.Y)
+			{
+				rect.Height = std::clamp(
+					(cs.AnchorMax.Y - cs.AnchorMin.Y) * inner.Height - cs.Margin.Top - cs.Margin.Bottom, cs.MinSize.Y, cs.MaxSize.Y);
+				rect.Y = cs.AnchorMin.Y * inner.Height + cs.Margin.Top + cs.Offset.Y;
+			}
+			else
+			{
+				rect.Y = cs.AnchorMin.Y * inner.Height + cs.Offset.Y + cs.Margin.Top - cs.Pivot.Y * rect.Height;
+			}
+
+			return rect;
+		}
+
+		float& MainOf(bool row, UiRect& r)
+		{
+			return row ? r.Width : r.Height;
+		}
+
+		float MainMargins(bool row, const UiStyle& cs)
+		{
+			return row ? cs.Margin.Left + cs.Margin.Right : cs.Margin.Top + cs.Margin.Bottom;
+		}
+
+		float FreeSpace(const UiStyle& s, bool row, float innerMain, std::vector<FlowItem>& flow)
+		{
+			float used = s.Gap * float(flow.empty() ? 0 : flow.size() - 1);
+
+			for (auto& item : flow)
+			{
+				used += MainOf(row, item.Rect) + MainMargins(row, *item.Style);
+			}
+
+			return innerMain - used;
+		}
+
+		// Grows or shrinks the line's items along the main axis; returns the space left.
+		float FitMainAxis(const UiStyle& s, bool row, float innerMain, std::vector<FlowItem>& flow)
+		{
+			const auto mainLimits = [&](const UiStyle& cs)
+			{
+				return row ? std::pair{ cs.MinSize.X, cs.MaxSize.X } : std::pair{ cs.MinSize.Y, cs.MaxSize.Y };
+			};
+			float free = FreeSpace(s, row, innerMain, flow);
+			float grow = 0.0f;
+			float shrink = 0.0f;
+
+			for (auto& item : flow)
+			{
+				grow += item.Style->Grow;
+				shrink += item.Style->Shrink * MainOf(row, item.Rect);
+			}
+
+			if (free > 0.0f && grow > 0.0f)
+			{
+				for (auto& item : flow)
+				{
+					const auto [low, high] = mainLimits(*item.Style);
+					MainOf(row, item.Rect) = std::clamp(MainOf(row, item.Rect) + free * item.Style->Grow / grow, low, high);
+				}
+
+				free = FreeSpace(s, row, innerMain, flow);
+			}
+			else if (free < 0.0f && shrink > 0.0f)
+			{
+				const float overflow = -free;
+
+				for (auto& item : flow)
+				{
+					const auto [low, high] = mainLimits(*item.Style);
+					const float share = overflow * item.Style->Shrink * MainOf(row, item.Rect) / shrink;
+					MainOf(row, item.Rect) = std::clamp(MainOf(row, item.Rect) - share, low, high);
+				}
+
+				free = FreeSpace(s, row, innerMain, flow);
+			}
+
+			return free;
+		}
+
+		// Row or column flow: fit the main axis, then justify along it and align across it.
+		void PlaceLine(const UiStyle& s, const UiRect& inner, std::vector<FlowItem>& flow)
+		{
+			const bool row = s.Flow == UiFlow::Row;
+			const auto crossOf = [&](UiRect& r) -> float&
+			{
+				return row ? r.Height : r.Width;
+			};
+			const float innerMain = row ? inner.Width : inner.Height;
+			const float innerCross = row ? inner.Height : inner.Width;
+			const float spare = std::max(0.0f, FitMainAxis(s, row, innerMain, flow));
+			const float n = float(flow.size());
+			float leading = 0.0f;
+			float between = 0.0f;
+
+			switch (s.Justify)
+			{
+			case UiJustify::Center:
+				leading = spare * 0.5f;
+				break;
+			case UiJustify::End:
+				leading = spare;
+				break;
+			case UiJustify::SpaceBetween:
+				between = flow.size() > 1 ? spare / (n - 1.0f) : 0.0f;
+				break;
+			case UiJustify::SpaceAround:
+				between = n > 0.0f ? spare / n : 0.0f;
+				leading = between * 0.5f;
+				break;
+			case UiJustify::SpaceEvenly:
+				between = spare / (n + 1.0f);
+				leading = between;
+				break;
+			default:
+				break;
+			}
+
+			float cursor = leading;
+
+			for (auto& item : flow)
+			{
+				const auto& cs = *item.Style;
+				const UiAlign align = ResolveAlign(s, cs);
+				const float crossStart = row ? cs.Margin.Top : cs.Margin.Left;
+				const float crossEnd = row ? cs.Margin.Bottom : cs.Margin.Right;
+				const bool crossAuto = row ? cs.Height.Unit == UiUnit::Auto : cs.Width.Unit == UiUnit::Auto;
+
+				if (align == UiAlign::Stretch && crossAuto)
+				{
+					crossOf(item.Rect) = std::max(0.0f,
+						std::clamp(
+							innerCross - crossStart - crossEnd, row ? cs.MinSize.Y : cs.MinSize.X, row ? cs.MaxSize.Y : cs.MaxSize.X));
+				}
+
+				const float cross = AlignOffset(align, innerCross, crossOf(item.Rect), crossStart, crossEnd);
+
+				if (row)
+				{
+					item.Rect.X = cursor + cs.Margin.Left;
+					item.Rect.Y = cross;
+					cursor += item.Rect.Width + cs.Margin.Left + cs.Margin.Right + s.Gap + between;
+				}
+				else
+				{
+					item.Rect.Y = cursor + cs.Margin.Top;
+					item.Rect.X = cross;
+					cursor += item.Rect.Height + cs.Margin.Top + cs.Margin.Bottom + s.Gap + between;
+				}
+			}
+		}
+
+		// Overlay: every child at the content origin, aligned on both axes.
+		void PlaceOverlay(const UiStyle& s, const UiRect& inner, std::vector<FlowItem>& flow)
+		{
+			for (auto& item : flow)
+			{
+				const auto& cs = *item.Style;
+				const UiAlign align = ResolveAlign(s, cs);
+
+				if (align == UiAlign::Stretch)
+				{
+					if (cs.Width.Unit == UiUnit::Auto)
+					{
+						item.Rect.Width =
+							std::max(0.0f, std::clamp(inner.Width - cs.Margin.Left - cs.Margin.Right, cs.MinSize.X, cs.MaxSize.X));
+					}
+
+					if (cs.Height.Unit == UiUnit::Auto)
+					{
+						item.Rect.Height =
+							std::max(0.0f, std::clamp(inner.Height - cs.Margin.Top - cs.Margin.Bottom, cs.MinSize.Y, cs.MaxSize.Y));
+					}
+				}
+
+				item.Rect.X = AlignOffset(align, inner.Width, item.Rect.Width, cs.Margin.Left, cs.Margin.Right);
+				item.Rect.Y = AlignOffset(align, inner.Height, item.Rect.Height, cs.Margin.Top, cs.Margin.Bottom);
+			}
+		}
+
 	} // namespace
 
 	std::string UiDocument::Impl::DisplayText(const Node& node) const
@@ -210,9 +415,28 @@ namespace Swim::UI
 
 		const UiPoint image = node.HasImage ? node.Image.Size : UiPoint{};
 
+		const float childRoom = std::isfinite(definite) ? definite : std::max(0.0f, wrap - px);
+		UiPoint content = MeasureChildren(node, inner, childRoom);
+
+		content.X = std::max({ content.X, node.TextSize.X, image.X });
+		content.Y = std::max({ content.Y, node.TextSize.Y, image.Y });
+		float width = std::clamp(Resolve(s.Width, available.X, content.X + px), s.MinSize.X, s.MaxSize.X);
+		float height = std::clamp(Resolve(s.Height, available.Y, content.Y + py), s.MinSize.Y, s.MaxSize.Y);
+		ApplyAspect(s, width, height);
+		node.Desired = { width, height };
+		node.CachedAvailable = available;
+		node.CachedWrap = wrap;
+		node.MeasureDirty = false;
+		node.SubtreeDirty = false;
+		return node.Desired;
+	}
+
+	// The flow children's extent (margins and gaps included); measures every child.
+	UiPoint UiDocument::Impl::MeasureChildren(Node& node, UiPoint inner, float childRoom)
+	{
+		const auto& s = node.Style;
 		UiPoint content;
 		std::size_t count = 0;
-		const float childRoom = std::isfinite(definite) ? definite : std::max(0.0f, wrap - px);
 
 		for (const auto childId : node.Children)
 		{
@@ -247,32 +471,14 @@ namespace Swim::UI
 			++count;
 		}
 
-		content.X = std::max({ content.X, node.TextSize.X, image.X });
-		content.Y = std::max({ content.Y, node.TextSize.Y, image.Y });
-		float width = std::clamp(Resolve(s.Width, available.X, content.X + px), s.MinSize.X, s.MaxSize.X);
-		float height = std::clamp(Resolve(s.Height, available.Y, content.Y + py), s.MinSize.Y, s.MaxSize.Y);
-		ApplyAspect(s, width, height);
-		node.Desired = { width, height };
-		node.CachedAvailable = available;
-		node.CachedWrap = wrap;
-		node.MeasureDirty = false;
-		node.SubtreeDirty = false;
-		return node.Desired;
+		return content;
 	}
 
 	void UiDocument::Impl::ArrangeChildren(
 		Node& node, const UiRect& inner, UiPoint& extent, std::vector<std::pair<UiNodeId, UiRect>>& placed)
 	{
 		const auto& s = node.Style;
-
-		struct Item
-		{
-			Node* Child = nullptr;
-			UiRect Rect;
-			std::size_t Slot = 0; // Index in `placed`, which keeps paint/tab order equal to child order.
-		};
-
-		std::vector<Item> flow;
+		std::vector<FlowItem> flow;
 
 		for (const auto childId : node.Children)
 		{
@@ -290,192 +496,21 @@ namespace Swim::UI
 
 			if (!cs.Absolute)
 			{
-				flow.push_back({ &child, { 0, 0, width, height }, placed.size() });
+				flow.push_back({ &cs, { 0, 0, width, height }, placed.size() });
 				placed.emplace_back(child.Id, UiRect{});
 				continue;
 			}
 
-			// Anchored placement relative to the content box.
-			UiRect rect{ 0, 0, width, height };
-
-			if (cs.AnchorMax.X > cs.AnchorMin.X)
-			{
-				rect.Width = std::clamp(
-					(cs.AnchorMax.X - cs.AnchorMin.X) * inner.Width - cs.Margin.Left - cs.Margin.Right, cs.MinSize.X, cs.MaxSize.X);
-				rect.X = cs.AnchorMin.X * inner.Width + cs.Margin.Left + cs.Offset.X;
-			}
-			else
-			{
-				rect.X = cs.AnchorMin.X * inner.Width + cs.Offset.X + cs.Margin.Left - cs.Pivot.X * rect.Width;
-			}
-
-			if (cs.AnchorMax.Y > cs.AnchorMin.Y)
-			{
-				rect.Height = std::clamp(
-					(cs.AnchorMax.Y - cs.AnchorMin.Y) * inner.Height - cs.Margin.Top - cs.Margin.Bottom, cs.MinSize.Y, cs.MaxSize.Y);
-				rect.Y = cs.AnchorMin.Y * inner.Height + cs.Margin.Top + cs.Offset.Y;
-			}
-			else
-			{
-				rect.Y = cs.AnchorMin.Y * inner.Height + cs.Offset.Y + cs.Margin.Top - cs.Pivot.Y * rect.Height;
-			}
-
-			placed.emplace_back(child.Id, rect);
+			placed.emplace_back(child.Id, AnchoredRect(cs, inner, width, height));
 		}
 
 		if (s.Flow == UiFlow::Row || s.Flow == UiFlow::Column)
 		{
-			const bool row = s.Flow == UiFlow::Row;
-			const auto mainOf = [&](UiRect& r) -> float&
-			{
-				return row ? r.Width : r.Height;
-			};
-			const auto crossOf = [&](UiRect& r) -> float&
-			{
-				return row ? r.Height : r.Width;
-			};
-			const auto mainMargins = [&](const UiStyle& cs)
-			{
-				return row ? cs.Margin.Left + cs.Margin.Right : cs.Margin.Top + cs.Margin.Bottom;
-			};
-			const auto mainLimits = [&](const UiStyle& cs)
-			{
-				return row ? std::pair{ cs.MinSize.X, cs.MaxSize.X } : std::pair{ cs.MinSize.Y, cs.MaxSize.Y };
-			};
-			const float innerMain = row ? inner.Width : inner.Height;
-			const float innerCross = row ? inner.Height : inner.Width;
-			const auto freeSpace = [&]
-			{
-				float used = s.Gap * float(flow.empty() ? 0 : flow.size() - 1);
-
-				for (auto& item : flow)
-				{
-					used += mainOf(item.Rect) + mainMargins(item.Child->Style);
-				}
-
-				return innerMain - used;
-			};
-			float free = freeSpace();
-			float grow = 0.0f;
-			float shrink = 0.0f;
-
-			for (auto& item : flow)
-			{
-				grow += item.Child->Style.Grow;
-				shrink += item.Child->Style.Shrink * mainOf(item.Rect);
-			}
-
-			if (free > 0.0f && grow > 0.0f)
-			{
-				for (auto& item : flow)
-				{
-					const auto [low, high] = mainLimits(item.Child->Style);
-					mainOf(item.Rect) = std::clamp(mainOf(item.Rect) + free * item.Child->Style.Grow / grow, low, high);
-				}
-
-				free = freeSpace();
-			}
-			else if (free < 0.0f && shrink > 0.0f)
-			{
-				const float overflow = -free;
-
-				for (auto& item : flow)
-				{
-					const auto [low, high] = mainLimits(item.Child->Style);
-					const float share = overflow * item.Child->Style.Shrink * mainOf(item.Rect) / shrink;
-					mainOf(item.Rect) = std::clamp(mainOf(item.Rect) - share, low, high);
-				}
-
-				free = freeSpace();
-			}
-
-			const float spare = std::max(0.0f, free);
-			const float n = float(flow.size());
-			float leading = 0.0f;
-			float between = 0.0f;
-
-			switch (s.Justify)
-			{
-			case UiJustify::Center:
-				leading = spare * 0.5f;
-				break;
-			case UiJustify::End:
-				leading = spare;
-				break;
-			case UiJustify::SpaceBetween:
-				between = flow.size() > 1 ? spare / (n - 1.0f) : 0.0f;
-				break;
-			case UiJustify::SpaceAround:
-				between = n > 0.0f ? spare / n : 0.0f;
-				leading = between * 0.5f;
-				break;
-			case UiJustify::SpaceEvenly:
-				between = spare / (n + 1.0f);
-				leading = between;
-				break;
-			default:
-				break;
-			}
-
-			float cursor = leading;
-
-			for (auto& item : flow)
-			{
-				const auto& cs = item.Child->Style;
-				const UiAlign align = ResolveAlign(s, cs);
-				const float crossStart = row ? cs.Margin.Top : cs.Margin.Left;
-				const float crossEnd = row ? cs.Margin.Bottom : cs.Margin.Right;
-				const bool crossAuto = row ? cs.Height.Unit == UiUnit::Auto : cs.Width.Unit == UiUnit::Auto;
-
-				if (align == UiAlign::Stretch && crossAuto)
-				{
-					crossOf(item.Rect) = std::max(0.0f,
-						std::clamp(
-							innerCross - crossStart - crossEnd, row ? cs.MinSize.Y : cs.MinSize.X, row ? cs.MaxSize.Y : cs.MaxSize.X));
-				}
-
-				const float cross = AlignOffset(align, innerCross, crossOf(item.Rect), crossStart, crossEnd);
-
-				if (row)
-				{
-					item.Rect.X = cursor + cs.Margin.Left;
-					item.Rect.Y = cross;
-					cursor += item.Rect.Width + cs.Margin.Left + cs.Margin.Right + s.Gap + between;
-				}
-				else
-				{
-					item.Rect.Y = cursor + cs.Margin.Top;
-					item.Rect.X = cross;
-					cursor += item.Rect.Height + cs.Margin.Top + cs.Margin.Bottom + s.Gap + between;
-				}
-			}
+			PlaceLine(s, inner, flow);
 		}
 		else
 		{
-			// Overlay: every child at the content origin, aligned on both axes.
-			for (auto& item : flow)
-			{
-				const auto& cs = item.Child->Style;
-				const UiAlign align = ResolveAlign(s, cs);
-
-				if (align == UiAlign::Stretch)
-				{
-					if (cs.Width.Unit == UiUnit::Auto)
-					{
-						item.Rect.Width =
-							std::max(0.0f, std::clamp(inner.Width - cs.Margin.Left - cs.Margin.Right, cs.MinSize.X, cs.MaxSize.X));
-					}
-
-					if (cs.Height.Unit == UiUnit::Auto)
-					{
-						item.Rect.Height =
-							std::max(0.0f, std::clamp(inner.Height - cs.Margin.Top - cs.Margin.Bottom, cs.MinSize.Y, cs.MaxSize.Y));
-					}
-				}
-
-				item.Rect.X = AlignOffset(align, inner.Width, item.Rect.Width, cs.Margin.Left, cs.Margin.Right);
-				item.Rect.Y = AlignOffset(align, inner.Height, item.Rect.Height, cs.Margin.Top, cs.Margin.Bottom);
-			}
+			PlaceOverlay(s, inner, flow);
 		}
 
 		for (auto& item : flow)

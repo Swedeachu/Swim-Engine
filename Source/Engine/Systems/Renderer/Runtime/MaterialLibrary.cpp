@@ -6,6 +6,7 @@
 #include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 #include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
 #include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
+#include "Engine/Logging/Log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -127,7 +128,29 @@ namespace Engine
 		entry.Instance = std::make_shared<Swim::Render::MaterialInstance>(materialTemplate);
 		entry.TextureIndices.fill(UINT32_MAX);
 		Write(entry, true);
-		entry.Handle = table.Create(entry.Instance);
+
+		if (entries.empty())
+		{
+			entry.Handle = table.Create(entry.Instance); // The default: a full table throws.
+		}
+		else if (auto handle = table.TryCreate(entry.Instance))
+		{
+			entry.Handle = *handle;
+		}
+		else
+		{
+			if (exhausted++ == 0)
+			{
+				const auto stats = table.GetStats();
+				Logging::Write(Logging::Level::Warning,
+					"[Render] The material table is full (" + std::to_string(stats.LiveMaterials) + " live, " +
+						std::to_string(stats.RetiringMaterials) + " retiring of " + std::to_string(stats.Capacity) +
+						" rows); new materials use the default until rows are released (logged once)");
+			}
+
+			return defaultSet;
+		}
+
 		const std::uint32_t set = table.GetIndex(entry.Handle);
 
 		if (router)
@@ -137,6 +160,11 @@ namespace Engine
 
 		entries[set] = std::move(entry);
 		return set;
+	}
+
+	std::uint32_t MaterialLibrary::GetCapacity() const
+	{
+		return table.GetStats().Capacity;
 	}
 
 	std::uint32_t MaterialLibrary::GetOrCreate(const MaterialDesc& desc)

@@ -1,4 +1,5 @@
 #include "Engine/Assets/SassetFormat.h"
+#include "Engine/Assets/SassetPayloadReaders.h"
 
 #include "Engine/Assets/AssetSystem.h"
 #include "Engine/Assets/SassetDecodedAsset.h"
@@ -23,6 +24,8 @@
 namespace Swim::Assets
 {
 
+	using namespace SassetDetail;
+
 	namespace
 	{
 
@@ -31,7 +34,6 @@ namespace Swim::Assets
 		constexpr std::size_t HeaderSize = SassetHeaderSize;
 		constexpr std::size_t ChunkEntrySize = SassetChunkEntrySize;
 		constexpr std::size_t ChunkHashOffset = 40;
-		constexpr std::size_t MaxCollectionCount = 1u << 24;
 
 		SassetParseResult MakeParseError(SassetErrorCode code, const char* message)
 		{
@@ -57,22 +59,6 @@ namespace Swim::Assets
 			}
 
 			return size <= static_cast<std::uint64_t>(totalSize) - offset;
-		}
-
-		std::uint16_t ReadU16(std::span<const std::byte> bytes, std::size_t offset)
-		{
-			return static_cast<std::uint16_t>(bytes[offset + 0]) | (static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
-		}
-
-		std::uint32_t ReadU32(std::span<const std::byte> bytes, std::size_t offset)
-		{
-			return static_cast<std::uint32_t>(bytes[offset + 0]) | (static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
-				(static_cast<std::uint32_t>(bytes[offset + 2]) << 16) | (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
-		}
-
-		std::uint64_t ReadU64(std::span<const std::byte> bytes, std::size_t offset)
-		{
-			return static_cast<std::uint64_t>(ReadU32(bytes, offset)) | (static_cast<std::uint64_t>(ReadU32(bytes, offset + 4)) << 32);
 		}
 
 		ContentHash ReadHash(std::span<const std::byte> bytes, std::size_t offset)
@@ -103,733 +89,6 @@ namespace Swim::Assets
 			default:
 				return false;
 			}
-		}
-
-		class BinaryReader
-		{
-
-		  public:
-
-			explicit BinaryReader(std::span<const std::byte> bytes) : bytes(bytes) {}
-
-			bool IsValid() const { return valid; }
-
-			bool IsAtEnd() const { return valid && offset == bytes.size(); }
-
-			std::uint8_t U8()
-			{
-				if (!Require(1))
-				{
-					return 0;
-				}
-
-				return static_cast<std::uint8_t>(bytes[offset++]);
-			}
-
-			std::uint16_t U16()
-			{
-				if (!Require(2))
-				{
-					return 0;
-				}
-
-				const std::uint16_t value = ReadU16(bytes, offset);
-				offset += 2;
-				return value;
-			}
-
-			std::uint32_t U32()
-			{
-				if (!Require(4))
-				{
-					return 0;
-				}
-
-				const std::uint32_t value = ReadU32(bytes, offset);
-				offset += 4;
-				return value;
-			}
-
-			std::int32_t I32() { return static_cast<std::int32_t>(U32()); }
-
-			std::uint64_t U64()
-			{
-				if (!Require(8))
-				{
-					return 0;
-				}
-
-				const std::uint64_t value = ReadU64(bytes, offset);
-				offset += 8;
-				return value;
-			}
-
-			float F32() { return std::bit_cast<float>(U32()); }
-
-			std::string String()
-			{
-				const std::uint32_t size = U32();
-
-				if (!valid || !Require(size))
-				{
-					return {};
-				}
-
-				std::string value(size, '\0');
-
-				if (size > 0)
-				{
-					std::memcpy(value.data(), bytes.data() + offset, size);
-				}
-
-				offset += size;
-				return value;
-			}
-
-			std::vector<std::byte> ByteVector()
-			{
-				const std::uint64_t size64 = U64();
-
-				if (!valid || size64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
-				{
-					valid = false;
-					return {};
-				}
-
-				const std::size_t size = static_cast<std::size_t>(size64);
-
-				if (!Require(size))
-				{
-					return {};
-				}
-
-				std::vector<std::byte> value(size);
-
-				if (size > 0)
-				{
-					std::memcpy(value.data(), bytes.data() + offset, size);
-				}
-
-				offset += size;
-				return value;
-			}
-
-			bool Count(std::uint32_t& count)
-			{
-				count = U32();
-
-				if (!valid || count > MaxCollectionCount)
-				{
-					valid = false;
-					return false;
-				}
-
-				return true;
-			}
-
-		  private:
-
-			bool Require(std::size_t count)
-			{
-				if (!valid || offset > bytes.size() || count > bytes.size() - offset)
-				{
-					valid = false;
-					return false;
-				}
-
-				return true;
-			}
-
-			std::span<const std::byte> bytes;
-			std::size_t offset = 0;
-			bool valid = true;
-
-		};
-
-		bool ReadBounds(BinaryReader& reader, AssetBounds& bounds)
-		{
-			for (float& value : bounds.Min)
-			{
-				value = reader.F32();
-			}
-
-			for (float& value : bounds.Max)
-			{
-				value = reader.F32();
-			}
-
-			return reader.IsValid();
-		}
-
-		bool ReadTransform(BinaryReader& reader, AssetTransform& transform)
-		{
-			for (float& value : transform.Translation)
-			{
-				value = reader.F32();
-			}
-
-			for (float& value : transform.Rotation)
-			{
-				value = reader.F32();
-			}
-
-			for (float& value : transform.Scale)
-			{
-				value = reader.F32();
-			}
-
-			return reader.IsValid();
-		}
-
-		bool ReadFloats(BinaryReader& reader, std::vector<float>& values)
-		{
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			values.resize(count);
-
-			for (float& value : values)
-			{
-				value = reader.F32();
-			}
-
-			return reader.IsValid();
-		}
-
-		bool ReadMatrix(BinaryReader& reader, std::array<float, 16>& matrix)
-		{
-			for (float& value : matrix)
-			{
-				value = reader.F32();
-			}
-
-			return reader.IsValid();
-		}
-
-		template <typename T> AssetHandle<T> DeclareReference(AssetSystem& assets, AssetId id)
-		{
-			if (!id.IsValid())
-			{
-				return {};
-			}
-
-			return assets.Declare<T>(id);
-		}
-
-		bool ReadMesh(BinaryReader& reader, MeshAsset& asset)
-		{
-			const std::uint32_t version = reader.U32();
-
-			if (version != SassetPayloadVersion && version != SassetMeshPayloadVersion)
-			{
-				return false;
-			}
-
-			asset.IndexFormat = static_cast<IndexElementFormat>(reader.U8());
-
-			if (!ReadBounds(reader, asset.Bounds))
-			{
-				return false;
-			}
-
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.VertexStreams.resize(count);
-
-			for (VertexStreamDesc& stream : asset.VertexStreams)
-			{
-				stream.StrideBytes = reader.U32();
-				stream.DataOffsetBytes = reader.U64();
-				stream.DataSizeBytes = reader.U64();
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.VertexAttributes.resize(count);
-
-			for (VertexAttributeDesc& attribute : asset.VertexAttributes)
-			{
-				attribute.Semantic = static_cast<VertexSemantic>(reader.U8());
-				attribute.Format = static_cast<VertexElementFormat>(reader.U8());
-				attribute.StreamIndex = reader.U16();
-				attribute.OffsetBytes = reader.U32();
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Primitives.resize(count);
-
-			for (MeshPrimitive& primitive : asset.Primitives)
-			{
-				primitive.FirstIndex = reader.U32();
-				primitive.IndexCount = reader.U32();
-				primitive.VertexOffset = reader.I32();
-				primitive.MaterialSlot = reader.U32();
-				ReadBounds(reader, primitive.Bounds);
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Lods.resize(count);
-
-			for (MeshLod& lod : asset.Lods)
-			{
-				lod.FirstPrimitive = reader.U32();
-				lod.PrimitiveCount = reader.U32();
-				lod.ScreenCoverage = reader.F32();
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Meshlets.resize(count);
-
-			for (MeshletDesc& meshlet : asset.Meshlets)
-			{
-				meshlet.VertexOffset = reader.U32();
-				meshlet.VertexCount = reader.U32();
-				meshlet.TriangleOffset = reader.U32();
-				meshlet.TriangleCount = reader.U32();
-			}
-
-			asset.VertexBytes = reader.ByteVector();
-			asset.IndexBytes = reader.ByteVector();
-			asset.MeshletVertexBytes = reader.ByteVector();
-			asset.MeshletTriangleBytes = reader.ByteVector();
-
-			if (version == SassetMeshPayloadVersion)
-			{
-				if (!reader.Count(count))
-				{
-					return false;
-				}
-
-				asset.MorphTargets.resize(count);
-
-				for (MeshMorphTarget& target : asset.MorphTargets)
-				{
-					target.Name = reader.String();
-
-					if (!ReadFloats(reader, target.PositionDeltas) || !ReadFloats(reader, target.NormalDeltas) ||
-						!ReadFloats(reader, target.TangentDeltas))
-					{
-						return false;
-					}
-				}
-
-				if (!ReadFloats(reader, asset.DefaultMorphWeights))
-				{
-					return false;
-				}
-
-				// Every non-empty delta array covers the whole vertex payload (stream 0).
-				const std::uint64_t vertices = asset.VertexStreams.empty() || asset.VertexStreams[0].StrideBytes == 0
-					? 0
-					: asset.VertexStreams[0].DataSizeBytes / asset.VertexStreams[0].StrideBytes;
-
-				for (const MeshMorphTarget& target : asset.MorphTargets)
-				{
-					for (const std::vector<float>* deltas : { &target.PositionDeltas, &target.NormalDeltas, &target.TangentDeltas })
-					{
-						if (!deltas->empty() && deltas->size() != vertices * 3)
-						{
-							return false;
-						}
-					}
-				}
-
-				if (!asset.DefaultMorphWeights.empty() && asset.DefaultMorphWeights.size() != asset.MorphTargets.size())
-				{
-					return false;
-				}
-			}
-
-			return reader.IsAtEnd();
-		}
-
-		bool ReadSkeleton(BinaryReader& reader, SkeletonAsset& asset)
-		{
-			if (reader.U32() != SassetPayloadVersion || !ReadMatrix(reader, asset.RootTransform))
-			{
-				return false;
-			}
-
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Joints.resize(count);
-
-			for (std::uint32_t index = 0; index < count; ++index)
-			{
-				SkeletonJoint& joint = asset.Joints[index];
-				joint.Name = reader.String();
-				joint.Parent = reader.U32();
-				joint.SourceNode = reader.U32();
-
-				if (!ReadTransform(reader, joint.RestTransform) || !ReadMatrix(reader, joint.InverseBind))
-				{
-					return false;
-				}
-
-				// Parents first: one forward pass computes model-space poses.
-				if (joint.Parent != SkeletonJoint::InvalidJoint && joint.Parent >= index)
-				{
-					return false;
-				}
-			}
-
-			return reader.IsAtEnd();
-		}
-
-		bool IsValidTrack(const AnimationTrack& track)
-		{
-			const std::uint32_t expected = track.Path == AnimationPath::Rotation ? 4u
-				: track.Path == AnimationPath::MorphWeights						 ? track.Components
-																				 : 3u;
-
-			if (static_cast<std::uint8_t>(track.Path) > static_cast<std::uint8_t>(AnimationPath::MorphWeights) ||
-				static_cast<std::uint8_t>(track.Interpolation) > static_cast<std::uint8_t>(AnimationInterpolation::CubicSpline) ||
-				track.Components == 0 || track.Components != expected || track.Times.empty())
-			{
-				return false;
-			}
-
-			const std::uint64_t perKey =
-				std::uint64_t(track.Components) * (track.Interpolation == AnimationInterpolation::CubicSpline ? 3u : 1u);
-
-			if (track.Values.size() != track.Times.size() * perKey)
-			{
-				return false;
-			}
-
-			for (std::size_t key = 0; key < track.Times.size(); ++key)
-			{
-				if (!std::isfinite(track.Times[key]) || (key > 0 && !(track.Times[key] > track.Times[key - 1])))
-				{
-					return false;
-				}
-			}
-
-			return true;
-		}
-
-		bool ReadAnimationClip(BinaryReader& reader, AnimationClipAsset& asset)
-		{
-			if (reader.U32() != SassetPayloadVersion)
-			{
-				return false;
-			}
-
-			asset.Name = reader.String();
-			asset.Duration = reader.F32();
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count) || !std::isfinite(asset.Duration) || asset.Duration < 0.0f)
-			{
-				return false;
-			}
-
-			asset.Tracks.resize(count);
-
-			for (AnimationTrack& track : asset.Tracks)
-			{
-				track.Target = reader.String();
-				track.Path = static_cast<AnimationPath>(reader.U8());
-				track.Interpolation = static_cast<AnimationInterpolation>(reader.U8());
-				track.Components = reader.U32();
-
-				if (!ReadFloats(reader, track.Times) || !ReadFloats(reader, track.Values) || !IsValidTrack(track))
-				{
-					return false;
-				}
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Events.resize(count);
-
-			for (std::size_t index = 0; index < asset.Events.size(); ++index)
-			{
-				asset.Events[index].Time = reader.F32();
-				asset.Events[index].Name = reader.String();
-
-				if (!std::isfinite(asset.Events[index].Time) || (index > 0 && asset.Events[index].Time < asset.Events[index - 1].Time))
-				{
-					return false;
-				}
-			}
-
-			return reader.IsAtEnd();
-		}
-
-		bool ReadTexture(BinaryReader& reader, TextureAsset& asset)
-		{
-			if (reader.U32() != SassetPayloadVersion)
-			{
-				return false;
-			}
-
-			asset.Dimension = static_cast<TextureDimension>(reader.U8());
-			asset.ColorSpace = static_cast<TextureColorSpace>(reader.U8());
-			asset.Semantic = static_cast<TextureSemantic>(reader.U8());
-			asset.Width = reader.U32();
-			asset.Height = reader.U32();
-			asset.Depth = reader.U32();
-			asset.ArrayLayers = reader.U32();
-
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Payloads.resize(count);
-
-			for (TexturePayloadVariant& payload : asset.Payloads)
-			{
-				payload.Container = static_cast<TextureContainerFormat>(reader.U8());
-				payload.Format = static_cast<TexturePayloadFormat>(reader.U8());
-				payload.Supercompression = static_cast<TextureSupercompression>(reader.U8());
-				payload.ContainerFormatCode = reader.U32();
-
-				std::uint32_t mipCount = 0;
-
-				if (!reader.Count(mipCount))
-				{
-					return false;
-				}
-
-				payload.Mips.resize(mipCount);
-
-				for (TextureMipDesc& mip : payload.Mips)
-				{
-					mip.Width = reader.U32();
-					mip.Height = reader.U32();
-					mip.Depth = reader.U32();
-					mip.OffsetBytes = reader.U64();
-					mip.SizeBytes = reader.U64();
-					mip.UncompressedSizeBytes = reader.U64();
-				}
-
-				payload.Bytes = reader.ByteVector();
-			}
-
-			return reader.IsAtEnd();
-		}
-
-		bool ReadSampler(BinaryReader& reader, SamplerAsset& asset)
-		{
-			if (reader.U32() != SassetPayloadVersion)
-			{
-				return false;
-			}
-
-			asset.MinFilter = static_cast<SamplerFilter>(reader.U8());
-			asset.MagFilter = static_cast<SamplerFilter>(reader.U8());
-			asset.MipFilter = static_cast<SamplerFilter>(reader.U8());
-			asset.AddressU = static_cast<SamplerAddressMode>(reader.U8());
-			asset.AddressV = static_cast<SamplerAddressMode>(reader.U8());
-			asset.AddressW = static_cast<SamplerAddressMode>(reader.U8());
-			asset.MaxAnisotropy = reader.F32();
-			return reader.IsAtEnd();
-		}
-
-		bool ReadMaterialTemplate(BinaryReader& reader, MaterialTemplateAsset& asset)
-		{
-			if (reader.U32() != SassetPayloadVersion)
-			{
-				return false;
-			}
-
-			asset.ShaderFamily = reader.String();
-			asset.FeatureMask = reader.U64();
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Parameters.resize(count);
-
-			for (MaterialParameterDesc& parameter : asset.Parameters)
-			{
-				parameter.Name = reader.String();
-				parameter.Type = static_cast<MaterialParameterType>(reader.U8());
-
-				for (float& value : parameter.DefaultValue)
-				{
-					value = reader.F32();
-				}
-			}
-
-			return reader.IsAtEnd();
-		}
-
-		bool ReadMaterialInstance(BinaryReader& reader, AssetSystem& assets, MaterialInstanceAsset& asset)
-		{
-			if (reader.U32() != SassetPayloadVersion)
-			{
-				return false;
-			}
-
-			asset.Template = DeclareReference<MaterialTemplateAsset>(assets, AssetId{ reader.U64() });
-
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Parameters.resize(count);
-
-			for (MaterialParameterValue& parameter : asset.Parameters)
-			{
-				parameter.Name = reader.String();
-
-				for (float& value : parameter.Value)
-				{
-					value = reader.F32();
-				}
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Textures.resize(count);
-
-			for (MaterialTextureBinding& texture : asset.Textures)
-			{
-				texture.Name = reader.String();
-				texture.Texture = DeclareReference<TextureAsset>(assets, AssetId{ reader.U64() });
-				texture.Sampler = DeclareReference<SamplerAsset>(assets, AssetId{ reader.U64() });
-			}
-
-			return reader.IsAtEnd();
-		}
-
-		bool ReadModel(BinaryReader& reader, AssetSystem& assets, ModelAsset& asset)
-		{
-			const std::uint32_t version = reader.U32();
-
-			if (version != SassetPayloadVersion && version != SassetModelPayloadVersion)
-			{
-				return false;
-			}
-
-			const bool animated = version == SassetModelPayloadVersion;
-			std::uint32_t count = 0;
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Nodes.resize(count);
-
-			for (ModelNode& node : asset.Nodes)
-			{
-				node.Name = reader.String();
-				node.Parent = reader.U32();
-				ReadTransform(reader, node.LocalTransform);
-				node.Mesh = DeclareReference<MeshAsset>(assets, AssetId{ reader.U64() });
-
-				std::uint32_t materialCount = 0;
-
-				if (!reader.Count(materialCount))
-				{
-					return false;
-				}
-
-				node.Materials.resize(materialCount);
-
-				for (AssetHandle<MaterialInstanceAsset>& material : node.Materials)
-				{
-					material = DeclareReference<MaterialInstanceAsset>(assets, AssetId{ reader.U64() });
-				}
-
-				if (animated)
-				{
-					node.Skin = DeclareReference<SkeletonAsset>(assets, AssetId{ reader.U64() });
-
-					if (!ReadFloats(reader, node.MorphWeights))
-					{
-						return false;
-					}
-				}
-			}
-
-			if (!reader.Count(count))
-			{
-				return false;
-			}
-
-			asset.Roots.resize(count);
-
-			for (std::uint32_t& root : asset.Roots)
-			{
-				root = reader.U32();
-			}
-
-			if (animated)
-			{
-				if (!reader.Count(count))
-				{
-					return false;
-				}
-
-				asset.Skeletons.resize(count);
-
-				for (AssetHandle<SkeletonAsset>& skeleton : asset.Skeletons)
-				{
-					skeleton = DeclareReference<SkeletonAsset>(assets, AssetId{ reader.U64() });
-				}
-
-				if (!reader.Count(count))
-				{
-					return false;
-				}
-
-				asset.Animations.resize(count);
-
-				for (AssetHandle<AnimationClipAsset>& animation : asset.Animations)
-				{
-					animation = DeclareReference<AnimationClipAsset>(assets, AssetId{ reader.U64() });
-				}
-			}
-
-			return reader.IsAtEnd();
 		}
 
 		template <typename T, typename ReaderFn>
@@ -870,91 +129,84 @@ namespace Swim::Assets
 		return {};
 	}
 
-	SassetParseResult ParseSasset(std::span<const std::byte> bytes, bool validateChunkHashes)
+	namespace
 	{
-		if (bytes.size() < HeaderSize)
+
+		// The header's table locations (validated against the payload by ReadHeader).
+		struct SassetTables
 		{
-			return MakeParseError(SassetErrorCode::Truncated, ".sasset header is truncated");
-		}
+			std::uint64_t DependencyOffset = 0;
+			std::uint32_t DependencyCount = 0;
+			std::uint32_t ChunkCount = 0;
+			std::uint64_t ChunkOffset = 0;
+		};
 
-		if (!std::equal(SassetMagic.begin(), SassetMagic.end(), bytes.begin()))
+		// The fixed header after the magic: metadata fields and table locations, validated.
+		std::optional<SassetParseResult> ReadHeader(std::span<const std::byte> bytes, SassetMetadata& metadata, SassetTables& tables)
 		{
-			return MakeParseError(SassetErrorCode::InvalidMagic, "payload does not contain the .sasset magic");
-		}
+			metadata.SchemaVersion = ReadU32(bytes, 8);
+			const std::uint32_t headerSize = ReadU32(bytes, 12);
+			metadata.Type = static_cast<SassetAssetType>(ReadU32(bytes, 16));
+			metadata.Id = AssetId{ ReadU64(bytes, 24) };
+			metadata.ContentHashValue = ReadHash(bytes, 32);
+			metadata.CompilerProfileHash = ReadHash(bytes, 64);
+			metadata.SourceHash = ReadHash(bytes, 96);
+			tables.DependencyOffset = ReadU64(bytes, 128);
+			tables.DependencyCount = ReadU32(bytes, 136);
+			tables.ChunkCount = ReadU32(bytes, 140);
+			tables.ChunkOffset = ReadU64(bytes, 144);
+			const std::uint64_t declaredFileSize = ReadU64(bytes, 152);
 
-		SassetParseResult result;
-		SassetMetadata& metadata = result.Metadata;
-		metadata.SchemaVersion = ReadU32(bytes, 8);
-		const std::uint32_t headerSize = ReadU32(bytes, 12);
-		metadata.Type = static_cast<SassetAssetType>(ReadU32(bytes, 16));
-		metadata.Id = AssetId{ ReadU64(bytes, 24) };
-		metadata.ContentHashValue = ReadHash(bytes, 32);
-		metadata.CompilerProfileHash = ReadHash(bytes, 64);
-		metadata.SourceHash = ReadHash(bytes, 96);
-		const std::uint64_t dependencyTableOffset = ReadU64(bytes, 128);
-		const std::uint32_t dependencyCount = ReadU32(bytes, 136);
-		const std::uint32_t chunkCount = ReadU32(bytes, 140);
-		const std::uint64_t chunkTableOffset = ReadU64(bytes, 144);
-		const std::uint64_t declaredFileSize = ReadU64(bytes, 152);
-
-		if (metadata.SchemaVersion != SassetSchemaVersion || headerSize != HeaderSize)
-		{
-			return MakeParseError(SassetErrorCode::UnsupportedVersion, "unsupported .sasset schema/header version");
-		}
-
-		if (!IsKnownType(metadata.Type))
-		{
-			return MakeParseError(SassetErrorCode::InvalidAssetType, ".sasset declares an unknown asset type");
-		}
-
-		if (!metadata.Id.IsValid())
-		{
-			return MakeParseError(SassetErrorCode::InvalidAssetId, ".sasset declares an invalid AssetId");
-		}
-
-		if (declaredFileSize != bytes.size())
-		{
-			return MakeParseError(SassetErrorCode::InvalidTable, ".sasset declared file size does not match payload size");
-		}
-
-		if (dependencyCount > MaxCollectionCount || chunkCount > MaxCollectionCount)
-		{
-			return MakeParseError(SassetErrorCode::InvalidTable, ".sasset table count exceeds runtime limits");
-		}
-
-		if (!RangeFits(dependencyTableOffset, static_cast<std::uint64_t>(dependencyCount) * 8u, bytes.size()))
-		{
-			return MakeParseError(SassetErrorCode::InvalidTable, ".sasset dependency table is out of range");
-		}
-
-		if (!RangeFits(chunkTableOffset, static_cast<std::uint64_t>(chunkCount) * ChunkEntrySize, bytes.size()))
-		{
-			return MakeParseError(SassetErrorCode::InvalidTable, ".sasset chunk table is out of range");
-		}
-
-		metadata.Dependencies.reserve(dependencyCount);
-
-		for (std::uint32_t index = 0; index < dependencyCount; ++index)
-		{
-			const AssetId id{ ReadU64(bytes, static_cast<std::size_t>(dependencyTableOffset) + index * 8u) };
-
-			if (!id.IsValid() || id == metadata.Id)
+			if (metadata.SchemaVersion != SassetSchemaVersion || headerSize != HeaderSize)
 			{
-				return MakeParseError(SassetErrorCode::InvalidTable, ".sasset dependency table contains an invalid/self dependency");
+				return MakeParseError(SassetErrorCode::UnsupportedVersion, "unsupported .sasset schema/header version");
 			}
 
-			metadata.Dependencies.push_back(id);
+			if (!IsKnownType(metadata.Type))
+			{
+				return MakeParseError(SassetErrorCode::InvalidAssetType, ".sasset declares an unknown asset type");
+			}
+
+			if (!metadata.Id.IsValid())
+			{
+				return MakeParseError(SassetErrorCode::InvalidAssetId, ".sasset declares an invalid AssetId");
+			}
+
+			if (declaredFileSize != bytes.size())
+			{
+				return MakeParseError(SassetErrorCode::InvalidTable, ".sasset declared file size does not match payload size");
+			}
+
+			if (tables.DependencyCount > MaxCollectionCount || tables.ChunkCount > MaxCollectionCount)
+			{
+				return MakeParseError(SassetErrorCode::InvalidTable, ".sasset table count exceeds runtime limits");
+			}
+
+			if (!RangeFits(tables.DependencyOffset, static_cast<std::uint64_t>(tables.DependencyCount) * 8u, bytes.size()))
+			{
+				return MakeParseError(SassetErrorCode::InvalidTable, ".sasset dependency table is out of range");
+			}
+
+			if (!RangeFits(tables.ChunkOffset, static_cast<std::uint64_t>(tables.ChunkCount) * ChunkEntrySize, bytes.size()))
+			{
+				return MakeParseError(SassetErrorCode::InvalidTable, ".sasset chunk table is out of range");
+			}
+
+			return std::nullopt;
 		}
 
-		metadata.Chunks.reserve(chunkCount);
-		bool foundLogicalPath = false;
-		bool foundPayload = false;
-		bool foundProvenance = false;
-
-		for (std::uint32_t index = 0; index < chunkCount; ++index)
+		// Which singleton chunks the table held so far.
+		struct FoundChunks
 		{
-			const std::size_t offset = static_cast<std::size_t>(chunkTableOffset) + index * ChunkEntrySize;
-			SassetChunkDesc chunk;
+			bool LogicalPath = false;
+			bool Payload = false;
+			bool Provenance = false;
+		};
+
+		// One chunk-table entry at `offset`, validated; an error result when it is invalid.
+		std::optional<SassetParseResult> ReadChunk(
+			std::span<const std::byte> bytes, std::size_t offset, bool validateChunkHashes, FoundChunks& found, SassetChunkDesc& chunk)
+		{
 			chunk.Type = static_cast<SassetChunkType>(ReadU32(bytes, offset + 0));
 			chunk.Compression = static_cast<SassetCompression>(ReadU32(bytes, offset + 4));
 			chunk.OffsetBytes = ReadU64(bytes, offset + 8);
@@ -999,72 +251,64 @@ namespace Swim::Assets
 			{
 			case SassetChunkType::LogicalPath:
 
-				if (foundLogicalPath)
+				if (found.LogicalPath)
 				{
 					return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset contains duplicate logical-path chunks");
 				}
 
-				foundLogicalPath = true;
+				found.LogicalPath = true;
 				break;
 			case SassetChunkType::SourceProvenance:
 
-				if (foundProvenance)
+				if (found.Provenance)
 				{
 					return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset contains duplicate source-provenance chunks");
 				}
 
-				foundProvenance = true;
+				found.Provenance = true;
 				break;
 			case SassetChunkType::AssetPayload:
 
-				if (foundPayload)
+				if (found.Payload)
 				{
 					return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset contains duplicate asset-payload chunks");
 				}
 
-				foundPayload = true;
+				found.Payload = true;
 				break;
 			default:
 				return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset contains an unknown required chunk type");
 			}
 
-			metadata.Chunks.push_back(chunk);
+			return std::nullopt;
 		}
 
-		if (!foundLogicalPath || !foundPayload)
+		std::optional<SassetParseResult> ReadLogicalPath(std::span<const std::byte> bytes, SassetMetadata& metadata)
 		{
-			return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset is missing its logical-path or asset-payload chunk");
-		}
+			const std::span<const std::byte> logicalPathBytes = GetSassetChunkBytes(bytes, metadata, SassetChunkType::LogicalPath);
 
-		const std::span<const std::byte> logicalPathBytes = GetSassetChunkBytes(bytes, metadata, SassetChunkType::LogicalPath);
-
-		if (logicalPathBytes.empty())
-		{
-			return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path cannot be empty");
-		}
-
-		metadata.LogicalPath.assign(reinterpret_cast<const char*>(logicalPathBytes.data()), logicalPathBytes.size());
-
-		try
-		{
-			if (NormalizeAssetPath(metadata.LogicalPath) != metadata.LogicalPath)
+			if (logicalPathBytes.empty())
 			{
-				return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path is not canonical");
+				return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path cannot be empty");
 			}
-		}
-		catch (const std::exception&)
-		{
-			return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path is invalid");
+
+			metadata.LogicalPath.assign(reinterpret_cast<const char*>(logicalPathBytes.data()), logicalPathBytes.size());
+
+			try
+			{
+				if (NormalizeAssetPath(metadata.LogicalPath) != metadata.LogicalPath)
+				{
+					return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path is not canonical");
+				}
+			}
+			catch (const std::exception&)
+			{
+				return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path is invalid");
+			}
+			return std::nullopt;
 		}
 
-		const std::span<const std::byte> payloadBytes = GetSassetChunkBytes(bytes, metadata, SassetChunkType::AssetPayload);
-
-		if (payloadBytes.empty() || (validateChunkHashes && ComputeContentHash(payloadBytes) != metadata.ContentHashValue))
-		{
-			return MakeParseError(SassetErrorCode::HashMismatch, ".sasset asset payload hash does not match the header content hash");
-		}
-
-		if (foundProvenance)
+		std::optional<SassetParseResult> ReadSourceProvenance(std::span<const std::byte> bytes, SassetMetadata& metadata)
 		{
 			BinaryReader reader(GetSassetChunkBytes(bytes, metadata, SassetChunkType::SourceProvenance));
 
@@ -1108,6 +352,86 @@ namespace Swim::Assets
 			{
 				return MakeParseError(SassetErrorCode::InvalidPayload, ".sasset source provenance payload is malformed");
 			}
+
+			return std::nullopt;
+		}
+
+	} // namespace
+
+	SassetParseResult ParseSasset(std::span<const std::byte> bytes, bool validateChunkHashes)
+	{
+		if (bytes.size() < HeaderSize)
+		{
+			return MakeParseError(SassetErrorCode::Truncated, ".sasset header is truncated");
+		}
+
+		if (!std::equal(SassetMagic.begin(), SassetMagic.end(), bytes.begin()))
+		{
+			return MakeParseError(SassetErrorCode::InvalidMagic, "payload does not contain the .sasset magic");
+		}
+
+		SassetParseResult result;
+		SassetMetadata& metadata = result.Metadata;
+		SassetTables tables;
+
+		if (auto error = ReadHeader(bytes, metadata, tables))
+		{
+			return std::move(*error);
+		}
+
+		metadata.Dependencies.reserve(tables.DependencyCount);
+
+		for (std::uint32_t index = 0; index < tables.DependencyCount; ++index)
+		{
+			const AssetId id{ ReadU64(bytes, static_cast<std::size_t>(tables.DependencyOffset) + index * 8u) };
+
+			if (!id.IsValid() || id == metadata.Id)
+			{
+				return MakeParseError(SassetErrorCode::InvalidTable, ".sasset dependency table contains an invalid/self dependency");
+			}
+
+			metadata.Dependencies.push_back(id);
+		}
+
+		metadata.Chunks.reserve(tables.ChunkCount);
+		FoundChunks found;
+
+		for (std::uint32_t index = 0; index < tables.ChunkCount; ++index)
+		{
+			SassetChunkDesc chunk;
+
+			if (auto error = ReadChunk(
+					bytes, static_cast<std::size_t>(tables.ChunkOffset) + index * ChunkEntrySize, validateChunkHashes, found, chunk))
+			{
+				return std::move(*error);
+			}
+
+			metadata.Chunks.push_back(chunk);
+		}
+
+		if (!found.LogicalPath || !found.Payload)
+		{
+			return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset is missing its logical-path or asset-payload chunk");
+		}
+
+		if (auto error = ReadLogicalPath(bytes, metadata))
+		{
+			return std::move(*error);
+		}
+
+		const std::span<const std::byte> payloadBytes = GetSassetChunkBytes(bytes, metadata, SassetChunkType::AssetPayload);
+
+		if (payloadBytes.empty() || (validateChunkHashes && ComputeContentHash(payloadBytes) != metadata.ContentHashValue))
+		{
+			return MakeParseError(SassetErrorCode::HashMismatch, ".sasset asset payload hash does not match the header content hash");
+		}
+
+		if (found.Provenance)
+		{
+			if (auto error = ReadSourceProvenance(bytes, metadata))
+			{
+				return std::move(*error);
+			}
 		}
 
 		return result;
@@ -1142,46 +466,22 @@ namespace Swim::Assets
 		switch (metadata.Type)
 		{
 		case SassetAssetType::Mesh:
-			published = PublishDecoded<MeshAsset>(assets, metadata, reader,
-				[](BinaryReader& input, MeshAsset& asset)
-				{
-					return ReadMesh(input, asset);
-				});
+			published = PublishDecoded<MeshAsset>(assets, metadata, reader, ReadMesh);
 			break;
 		case SassetAssetType::Texture:
-			published = PublishDecoded<TextureAsset>(assets, metadata, reader,
-				[](BinaryReader& input, TextureAsset& asset)
-				{
-					return ReadTexture(input, asset);
-				});
+			published = PublishDecoded<TextureAsset>(assets, metadata, reader, ReadTexture);
 			break;
 		case SassetAssetType::Sampler:
-			published = PublishDecoded<SamplerAsset>(assets, metadata, reader,
-				[](BinaryReader& input, SamplerAsset& asset)
-				{
-					return ReadSampler(input, asset);
-				});
+			published = PublishDecoded<SamplerAsset>(assets, metadata, reader, ReadSampler);
 			break;
 		case SassetAssetType::MaterialTemplate:
-			published = PublishDecoded<MaterialTemplateAsset>(assets, metadata, reader,
-				[](BinaryReader& input, MaterialTemplateAsset& asset)
-				{
-					return ReadMaterialTemplate(input, asset);
-				});
+			published = PublishDecoded<MaterialTemplateAsset>(assets, metadata, reader, ReadMaterialTemplate);
 			break;
 		case SassetAssetType::Skeleton:
-			published = PublishDecoded<SkeletonAsset>(assets, metadata, reader,
-				[](BinaryReader& input, SkeletonAsset& asset)
-				{
-					return ReadSkeleton(input, asset);
-				});
+			published = PublishDecoded<SkeletonAsset>(assets, metadata, reader, ReadSkeleton);
 			break;
 		case SassetAssetType::AnimationClip:
-			published = PublishDecoded<AnimationClipAsset>(assets, metadata, reader,
-				[](BinaryReader& input, AnimationClipAsset& asset)
-				{
-					return ReadAnimationClip(input, asset);
-				});
+			published = PublishDecoded<AnimationClipAsset>(assets, metadata, reader, ReadAnimationClip);
 			break;
 		case SassetAssetType::MaterialInstance:
 		{

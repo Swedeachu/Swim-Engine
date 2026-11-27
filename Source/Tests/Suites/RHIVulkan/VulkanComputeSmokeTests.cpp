@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_COMPUTE_SPIRV_PATH
@@ -25,7 +26,7 @@ namespace
 		using namespace Swim;
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_COMPUTE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_COMPUTE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
 		SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), 1u);
@@ -43,7 +44,7 @@ namespace
 
 			throw std::runtime_error("Compute reflection is missing a buffer binding");
 		};
-		std::ifstream file(SWIM_RHI_COMPUTE_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_COMPUTE_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -53,14 +54,12 @@ namespace
 		SWIM_REQUIRE(file);
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Compute smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
-		auto program = device->CreateShaderProgram({ { &stage, 1 },
-			{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "Compute smoke program" });
+		auto program =
+			device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(interface), "Compute smoke program" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "Compute smoke layout" });
 		SWIM_REQUIRE(layout);
@@ -149,8 +148,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ComputeStoragePassesAndReadback",
-				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunComputeSmoke); } });
+			Swim::Testing::AddSmoke<&RunComputeSmoke>("ComputeStoragePassesAndReadback", SWIM_TEST_LOCATION);
 		}
 
 		return true;

@@ -73,6 +73,7 @@ namespace Swim::RhiVulkan
 		}
 
 		RequireVulkanDevice(state);
+		state.Deferred->IdleAll();
 	}
 
 	void RetireLostVulkanDevice(const VulkanDeviceState& state) noexcept

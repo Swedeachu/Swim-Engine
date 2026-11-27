@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_GPU_SCENE_PROBE_SPIRV_PATH
@@ -38,11 +39,11 @@ namespace
 
 		const auto reflection = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_GPU_SCENE_PROBE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(reflection, reflection.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(reflection.Reflection, SWIM_RHI_GPU_SCENE_PROBE_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
 		SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), 1u);
-		std::ifstream file(SWIM_RHI_GPU_SCENE_PROBE_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_GPU_SCENE_PROBE_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		std::vector<std::byte> bytecode(static_cast<std::size_t>(file.tellg()));
 		file.seekg(0);
@@ -51,15 +52,12 @@ namespace
 
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "GPU Scene smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
-		auto program = device->CreateShaderProgram({ { &stage, 1 },
-			{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "GPU Scene probe" });
+		auto program = device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(interface), "GPU Scene probe" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "GPU Scene probe layout" });
 		SWIM_REQUIRE(layout);
@@ -214,11 +212,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuSceneHundredThousandObjectsDirtyUploads", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunGpuSceneSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunGpuSceneSmoke>("GpuSceneHundredThousandObjectsDirtyUploads", SWIM_TEST_LOCATION);
 		}
 
 		return true;

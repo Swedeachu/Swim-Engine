@@ -186,6 +186,13 @@ namespace Swim::UI
 		// then TabIndex 0 in document order; negative values are skipped by Tab and
 		// directional navigation (still focusable by pointer or Focus()).
 		std::int32_t TabIndex = 0;
+		// Paint-only: the render layer of this node and its descendants (0 = the parent's).
+		// A node's layer is its nearest ancestor-or-self with a nonzero Layer; a popup or
+		// tooltip without one takes its anchor's (else its tooltip target's, else the node
+		// focused when it opened). The renderer draws layers in ascending order, so one
+		// document can be split around a pass between layers (e.g. a blur under menus);
+		// UiPaintQuad::Layer carries it, clips still apply.
+		std::int32_t Layer = 0;
 	};
 
 	// Clamp every value into its valid range; non-finite values and unknown enums take the
@@ -555,6 +562,7 @@ namespace Swim::UI
 		float ShearPivotY = 0.0f;
 		UiBlend Blend = UiBlend::Normal; // Images only.
 		float Glint = 0.0f;				 // Images only: UiImage::Glint.
+		std::int32_t Layer = 0;			 // The node's effective UiStyle::Layer (set by Paint).
 	};
 
 	enum class UiEventKind : std::uint8_t

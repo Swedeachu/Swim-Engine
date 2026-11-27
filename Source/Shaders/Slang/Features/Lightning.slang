@@ -1,6 +1,7 @@
 // Lightning bolts (Engine::Lightning) in the Forward+ transparent pass: each segment is a
 // camera-facing ribbon pulled from Segments, drawn additively (premultiplied colour with
 // alpha 0) as a hot core inside a wide glow, so bloom carries the flash.
+#include "Resources/DrawIndex.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 
 struct LightningConstants
@@ -24,8 +25,9 @@ struct VertexOutput
 static const uint RibbonCorner[6] = { 0, 1, 2, 0, 2, 3 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	const uint segment = vertexId / 6u;
 	const uint corner = RibbonCorner[vertexId % 6u];
 	const float4 a = Segments[segment * 2u];

@@ -7,6 +7,7 @@
 //  - BlockFireGlow (BLOCK_FIRE_GLOW, transparent pass): per fire a soft glow halo, rising
 //    embers, quick sparks and light smoke: stateless GPU particles whose positions are
 //    functions of time and the fire's seed.
+#include "Resources/DrawIndex.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 #include "Features/Wind.slang"
 
@@ -181,8 +182,9 @@ struct VertexOutput
 static const uint CardCorner[6] = { 0, 1, 2, 0, 2, 3 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	const BlockFireParams params = Params[0];
 	const uint fireIndex = vertexId / (CardsPerFire * 6u);
 	const FireRecord fire = Fires[fireIndex];
@@ -278,7 +280,13 @@ ForwardOpaqueTargets fragmentMain(VertexOutput input)
 	surface.Alpha = 1.0;
 	surface.Discard = false;
 	surface.Thin = true;
-	const ForwardLighting lit = ForwardLightSurface(surface, input.WorldPosition, input.Position.xy);
+	// Flame is pure emission (black, fully rough): the cluster light loop and shadow lookups
+	// would add next to nothing, and crossed flame quads overdraw, so they are skipped.
+	ForwardLighting lit;
+	lit.Radiance = emission;
+	lit.Indirect = float3(0.0, 0.0, 0.0);
+	lit.Reflectance = float3(0.0, 0.0, 0.0);
+	lit.Specular = float3(0.0, 0.0, 0.0);
 	return ForwardOpaqueWrite(lit, surface, ForwardNoObject, input.CurrentClip, input.PreviousClip);
 }
 
@@ -312,8 +320,9 @@ float3 FireCentre(FireRecord fire)
 }
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
 	const BlockFireParams params = Params[0];
 	const uint fireIndex = vertexId / (SlotsPerFire * 6u);
 	const uint slot = (vertexId / 6u) % SlotsPerFire;

@@ -1,6 +1,7 @@
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
@@ -19,7 +20,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(false, "Triangle smoke requires SWIM_BUILD_SHADER_COMPILER=ON and the generated Slang artifact");
 #else
 		using namespace Swim;
-		std::ifstream file(SWIM_RHI_TRIANGLE_SPIRV_PATH, std::ios::binary | std::ios::ate);
+		std::ifstream file(Swim::Testing::SmokeBytecodePath(SWIM_RHI_TRIANGLE_SPIRV_PATH), std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE_MESSAGE(file, "Compiled RHI triangle shader is missing");
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -34,9 +35,7 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE_MESSAGE(graphics, "Triangle smoke requires the full Swim Vulkan 1.3 baseline");
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{{
@@ -141,7 +140,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TrianglePixelsAndIndexedParity", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunTriangleSmoke); } });
+			Swim::Testing::AddSmoke<&RunTriangleSmoke>("TrianglePixelsAndIndexedParity", SWIM_TEST_LOCATION);
 		}
 
 		return true;

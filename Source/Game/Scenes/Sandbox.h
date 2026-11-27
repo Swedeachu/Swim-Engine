@@ -274,6 +274,13 @@ namespace Game
 		Engine::EventSubscription zoneSubscription;
 		std::uint32_t builds = 0;
 		std::uint32_t requestedTab = UINT32_MAX;
+		void RegisterEffectCommands(Swim::Commands::CommandRegistry& commands);
+		void RegisterOutlineCommands(Swim::Commands::CommandRegistry& commands);
+		void RegisterWaterCommands(Swim::Commands::CommandRegistry& commands);
+		void RegisterSkyCommands(Swim::Commands::CommandRegistry& commands);
+		void RegisterReflectionCommands(Swim::Commands::CommandRegistry& commands);
+		void RegisterViewCommands(Swim::Commands::CommandRegistry& commands);
+
 		bool commandsRegistered = false;
 		bool hudVisible = true;
 		std::uint32_t lastBookmark = 0;

@@ -12,6 +12,7 @@
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeferredReleases.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeviceLoss.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanPipelineCache.h"
@@ -69,6 +70,8 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<Rhi::DeviceDiagnostics> Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>();
 		bool DeviceFaultEnabled = false;
 		bool MemoryBudgetEnabled = false;
+		// SWIM_PIPELINE_STATS=1: pipelines capture their executable statistics, logged on creation.
+		bool PipelineStatisticsEnabled = false;
 		// Optional descriptorBindingUpdateUnusedWhilePending was enabled with the
 		// required descriptor-indexing features (GraphicsCapabilities::BindlessDescriptors).
 		bool BindlessDescriptorsEnabled = false;
@@ -97,6 +100,9 @@ namespace Swim::RhiVulkan
 		}
 		VmaVulkanFunctions AllocatorFunctions{};
 		VmaAllocator Allocator = nullptr;
+		// Buffers, images and views released while the GPU may still use them run their release
+		// once the queues' progress timelines pass it (Shutdown runs the rest, before the allocator).
+		std::unique_ptr<VulkanDeferredReleases> Deferred = std::make_unique<VulkanDeferredReleases>();
 		std::atomic<std::uint32_t> SamplerCount{ 0 };
 		// Reset, reusable one-set descriptor pools by their creation signature (flags, then
 		// type/count pairs): descriptor tables created every frame reuse them instead of a
@@ -110,6 +116,14 @@ namespace Swim::RhiVulkan
 		{
 			SubmitWorker.reset();
 			RetireLostVulkanDevice(*this);
+
+			if (Deferred->GetPending() != 0 && !Diagnostics->IsLost() && Device.device != VK_NULL_HANDLE &&
+				Dispatch.vkDeviceWaitIdle != nullptr)
+			{
+				Dispatch.vkDeviceWaitIdle(Device.device);
+			}
+
+			Deferred->Shutdown();
 
 			if (Device.device != VK_NULL_HANDLE && Dispatch.vkDestroyDescriptorPool != nullptr)
 			{

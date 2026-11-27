@@ -62,7 +62,8 @@ namespace Swim::RhiVulkan
 		recording = true;
 		graphicsPipeline = nullptr;
 		computePipeline = nullptr;
-		boundTables.clear();
+		graphicsTables.Reset();
+		computeTables.Reset();
 		pushConstantRanges.clear();
 		initializedPushConstants.clear();
 		availableIndices = 0;

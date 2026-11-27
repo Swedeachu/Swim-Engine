@@ -179,10 +179,11 @@ struct CelestialParams
 };
 
 [[vk::binding(0, 0)]] StructuredBuffer<CelestialParams> Params;
-[[vk::binding(1, 0)]] Texture2D<float4> Color;
 [[vk::binding(2, 0)]] Texture2D<float> Depth;
 [[vk::binding(3, 0)]] Texture2D<float4> DeepSky;
 [[vk::binding(4, 0)]] SamplerState LinearRepeat;
+// The scene colour, updated in place: pixels behind geometry, below the horizon or with nothing
+// added are neither read nor written.
 [[vk::binding(5, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> Output;
 
 // Blackbody colour (normalized to its brightest channel) for 2000..15000 K, a fit to the
@@ -310,10 +311,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	{
 		return;
 	}
-	float4 scene = Color.Load(int3(id.xy, 0));
 	if (Depth.Load(int3(id.xy, 0)) > 0.0)
 	{
-		Output[id.xy] = scene;
 		return;
 	}
 	const float2 uv = (float2(id.xy) + 0.5) / float2(params.Size.xy);
@@ -322,7 +321,6 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float horizon = saturate(ray.y * 60.0 + 1.0);
 	if (horizon <= 0.0)
 	{
-		Output[id.xy] = scene;
 		return;
 	}
 	const float spread = 2.0 * params.Right.w / float(params.Size.y);
@@ -403,7 +401,10 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		}
 		added += sky * extinction * night;
 	}
-	scene.rgb += added;
-	Output[id.xy] = scene;
+	if (any(added != 0.0))
+	{
+		const float4 scene = Output[id.xy];
+		Output[id.xy] = float4(scene.rgb + added, scene.a);
+	}
 }
 #endif

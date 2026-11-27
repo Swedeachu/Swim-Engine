@@ -69,6 +69,22 @@ SWIM_TEST("RHI.UploadArena", "DescriptorUsageHonorsAdapterOffsetAlignment")
 	SWIM_CHECK_EQUAL(third->Offset, 512ull);
 }
 
+SWIM_TEST("RHI.UploadArena", "StridedSlicesStartOnWholeElements")
+{
+	Testing::MockDevice device;
+	device.adapterInfo.Capabilities.MinStorageBufferOffsetAlignment = 256;
+	auto arena = Rhi::UploadArena::Create(device, { 4096, Rhi::BufferUsage::Storage });
+	SWIM_REQUIRE(arena);
+	const auto first = arena->Allocate(5, 16);
+	const auto second = arena->Allocate(96, 16, 96);
+	const auto third = arena->Allocate(64, 16, 64);
+	SWIM_REQUIRE(first && second && third);
+	SWIM_CHECK_EQUAL(second->Offset, 768ull); // The first multiple of 256 and 96 after 0.
+	SWIM_CHECK_EQUAL(third->Offset, 1024ull);
+	SWIM_CHECK(!arena->Allocate(96, 16, 96 * 64)); // Past the capacity: the cursor stays.
+	SWIM_CHECK_EQUAL(arena->GetUsedBytes(), 1088ull);
+}
+
 SWIM_TEST("RHI.UploadArena", "InvalidConfigurationAndAllocationFailureAreRejected")
 {
 	Testing::MockDevice device;

@@ -85,6 +85,31 @@ namespace Swim::Input
 		deferredTextCompositionLength = 0;
 	}
 
+	// Key and physical-key state, plus the press and text-edit queues.
+	void InputSystem::ProcessKeyEvent(const Platform::InputEvent& event)
+	{
+		const bool down = event.Type == Platform::InputEventType::KeyDown;
+		const size_t keyIndex = ToIndex(event.Key);
+
+		if (keyIndex > 0 && keyIndex < keyState.size())
+		{
+			keyState[keyIndex].Deferred = down;
+
+			if (down)
+			{
+				deferredKeyPresses.push_back(event.Key);
+				deferredTextEditEvents.push_back({ event.Key, {}, event.Repeat });
+			}
+		}
+
+		const size_t scanCodeIndex = ToIndex(event.PhysicalKey);
+
+		if (scanCodeIndex > 0 && scanCodeIndex < scanCodeState.size())
+		{
+			scanCodeState[scanCodeIndex].Deferred = down;
+		}
+	}
+
 	void InputSystem::ProcessInputEvent(const Platform::InputEvent& event)
 	{
 		using namespace Platform;
@@ -94,27 +119,7 @@ namespace Swim::Input
 			case InputEventType::KeyDown:
 			case InputEventType::KeyUp:
 			{
-				const bool down = event.Type == InputEventType::KeyDown;
-				const size_t keyIndex = ToIndex(event.Key);
-
-				if (keyIndex > 0 && keyIndex < keyState.size())
-				{
-					keyState[keyIndex].Deferred = down;
-
-					if (down)
-					{
-						deferredKeyPresses.push_back(event.Key);
-						deferredTextEditEvents.push_back({ event.Key, {}, event.Repeat });
-					}
-				}
-
-				const size_t scanCodeIndex = ToIndex(event.PhysicalKey);
-
-				if (scanCodeIndex > 0 && scanCodeIndex < scanCodeState.size())
-				{
-					scanCodeState[scanCodeIndex].Deferred = down;
-				}
-
+				ProcessKeyEvent(event);
 				break;
 			}
 

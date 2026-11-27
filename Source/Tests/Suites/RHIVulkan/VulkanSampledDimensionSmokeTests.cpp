@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Fixtures/SampledDimensionData.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
+#include "Tests/Fixtures/SmokeBackend.h"
 #include "Tests/Framework/Test.h"
 
 #ifdef SWIM_RHI_SAMPLED_DIMENSIONS_SPIRV_PATH
@@ -22,9 +23,7 @@ namespace
 		using namespace Swim;
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Sampled dimension smoke requires working SDL Vulkan platform services");
-		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
-		SWIM_REQUIRE(graphics);
-		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto graphics = Swim::Testing::CreateSmokeGraphicsSystem(graphicsDesc);
 		auto& adapter = graphics->GetAdapter(0);
 		const bool cubes = adapter.GetInfo().Capabilities.SampledCubeArray;
 		std::cerr << "[RHI sampled dimensions] cube-array coverage=" << (cubes ? "enabled" : "unsupported; base shapes still required")
@@ -34,11 +33,13 @@ namespace
 		const auto parsed = ShaderCompiler::LoadSlangReflectionJson(
 			cubes ? SWIM_RHI_SAMPLED_CUBE_ARRAY_REFLECTION_PATH : SWIM_RHI_SAMPLED_DIMENSIONS_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
-		const auto converted = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
+		const auto converted = Swim::Testing::BuildSmokeInterface(
+			parsed.Reflection, cubes ? SWIM_RHI_SAMPLED_CUBE_ARRAY_REFLECTION_PATH : SWIM_RHI_SAMPLED_DIMENSIONS_REFLECTION_PATH);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
 		std::ifstream file(
-			cubes ? SWIM_RHI_SAMPLED_CUBE_ARRAY_SPIRV_PATH : SWIM_RHI_SAMPLED_DIMENSIONS_SPIRV_PATH, std::ios::binary | std::ios::ate);
+			Swim::Testing::SmokeBytecodePath(cubes ? SWIM_RHI_SAMPLED_CUBE_ARRAY_SPIRV_PATH : SWIM_RHI_SAMPLED_DIMENSIONS_SPIRV_PATH),
+			std::ios::binary | std::ios::ate);
 		SWIM_REQUIRE(file);
 		const auto size = file.tellg();
 		SWIM_REQUIRE(size > 0);
@@ -47,8 +48,7 @@ namespace
 		file.read(reinterpret_cast<char*>(bytecode.data()), static_cast<std::streamsize>(bytecode.size()));
 		SWIM_REQUIRE(file);
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
-		auto program = device->CreateShaderProgram({ { &stage, 1 },
-			{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "Sampled dimensions" });
+		auto program = device->CreateShaderProgram({ { &stage, 1 }, Swim::Testing::SmokeInterfaceDesc(interface), "Sampled dimensions" });
 		SWIM_REQUIRE(program);
 		auto layout = device->CreatePipelineLayout({ program.get(), "Sampled dimension layout" });
 		SWIM_REQUIRE(layout);
@@ -189,11 +189,7 @@ namespace
 
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "SampledDimensionsAndReadback", SWIM_TEST_LOCATION,
-				+[]
-				{
-					Swim::Testing::RunValidatedVulkanSmoke(&RunSampledDimensionSmoke);
-				} });
+			Swim::Testing::AddSmoke<&RunSampledDimensionSmoke>("SampledDimensionsAndReadback", SWIM_TEST_LOCATION);
 		}
 
 		return true;

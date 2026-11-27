@@ -36,7 +36,7 @@ namespace Swim::Render
 		float FogAnisotropy = 0.0f;
 		float FogStartDistance = 0.0f;
 		float FogMaxDistance = 1000.0f;
-		std::uint32_t AoHalf = 0; // 1: the raw AO is half size (AmbientOcclusionSettings::HalfResolution).
+		std::uint32_t AoHalf = 0; // Bit 0: the raw AO is half size (AmbientOcclusionSettings::HalfResolution); bit 1: AO depth is linear.
 		// Screen-space reflections (item 76).
 		float Projection[16] = {}; // View -> clip (unjittered), to project the rays.
 		float SsrMaxDistance = 20.0f;
@@ -55,7 +55,8 @@ namespace Swim::Render
 		std::uint32_t ProbeCount = 0;	   // Active GpuReflectionProbeRecords.
 		std::uint32_t ProbeMipCount = 1;   // Prefiltered probe atlas mips.
 		std::uint32_t ReflectionDebug = 0; // ReflectionDebugView.
-		std::uint32_t SsrHalf = 0; // 1: checkerboard, the reflection texture half as wide (ReflectionSettings::HalfResolution).
+		std::uint32_t SsrHalf =
+			0; // 1: checkerboard, the reflection texture half as wide (ReflectionSettings::HalfResolution); 3: without HalfTapCache.
 		// The temporal reflection filter: bit 0 writes this frame's reflection term, bit 1
 		// blends last frame's in (ScreenSpaceFrame::ReflectionTemporal).
 		std::uint32_t ReflectionTemporal = 0;

@@ -54,6 +54,8 @@ namespace Engine
 		GlintSettings Glint;
 		bool Environment = true;   // Image-based lighting from the procedural sky.
 		bool SkyBackground = true; // Draw the sky behind the scene (else ClearColor).
+		// Linear radiance scale of a FrameRenderer::SetSkyCubemap sky (its sRGB colours at 1).
+		float SkyCubemapIntensity = 1.0f;
 		std::array<float, 3> ClearColor{ 0.02f, 0.02f, 0.025f };
 		Swim::Render::Environment::ProceduralSky Sky{};
 		// The colour the sky background draws below the horizon, when set; lighting and the
@@ -87,6 +89,14 @@ namespace Engine
 		// the others every fourth (sooner when the camera or light moves enough); see
 		// FrameRenderer's PlanShadowCache.
 		bool ShadowCascadeCache = true;
+		// With the cascade cache: static casters (RenderObjectFlags::Static objects and
+		// ExternalGeometryDraws::StaticShadow draws) are kept in a second atlas and redrawn only
+		// when the cascade moves or they change; each cascade refresh copies them and draws the
+		// dynamic casters on top.
+		bool ShadowStaticLayer = true;
+		// With the static layer: every cascade redraws its dynamic casters every frame (moving
+		// shadows never lag); the static layer still follows the cascade's own refreshes.
+		bool ShadowDynamicEveryFrame = false;
 		Swim::Render::ShadowSettings Shadow{};
 
 		// Clustered lights.
@@ -107,11 +117,40 @@ namespace Engine
 		bool Particles = true;
 		bool TemporalAntiAliasing = true; // Taa only (false: no anti-aliasing while Taa is chosen).
 		AntiAliasingMode AntiAliasing = AntiAliasingMode::Taa;
+		// Multisample anti-aliasing of the scene geometry: 1 (off), 2, 4, 8 or 16 samples, lowered
+		// to the largest count the device supports at or below it (FrameRenderer::
+		// GetSupportedMsaaSamples lists them; RenderStats::MsaaSamples is the count a frame used). The sky,
+		// depth prepass and opaque pass draw multisampled and are resolved before the transparent
+		// layers and every screen-space pass; works with any AntiAliasing mode, TAA on or off.
+		// Alpha-masked materials use alpha to coverage. Memory: the seven opaque targets and
+		// depth, times the sample count, on top of the single-sample ones.
+		std::uint32_t MsaaSamples = 1;
 		// FXAA/SMAA smooth only geometric edges (depth steps, normal turns) and keep corners
 		// square, so texture texel edges stay hard; false: every luma edge (classic).
 		bool CrispAntiAliasing = true;
 		float Sharpening = 0.25f;	  // Contrast-adaptive sharpening after anti-aliasing, 0..1 (0 = off); restores what TAA/FXAA soften.
 		bool CinematicEffects = true; // Off: render features with IsCinematic() are skipped.
+
+		// Blur of the finished frame (after post-processing, anti-aliasing and the
+		// AfterPostProcess features, before the UI), for backdrops behind menus. A dual-filter
+		// (Kawase) down/up chain in linear light, about 1 to 6 half-size levels.
+		struct ScreenBlurSettings
+		{
+			// 0 = off (no passes, no cost) .. 1 = strongest (a radius of about 48 pixels at
+			// 1080p, scaled with the frame height). Small values fade the blur in.
+			float Strength = 0.0f;
+			// 0 = the whole frame; else only inside Regions[0 .. RegionCount) (at most 4),
+			// pixel rectangles { x0, y0, x1, y1 } in the frame's pixels (x1, y1 exclusive),
+			// for blurring only behind UI panels. The chain still covers the whole frame.
+			std::uint32_t RegionCount = 0;
+			std::array<std::array<float, 4>, 4> Regions{};
+			// Where the blur runs: unset = before any UI; L = after the UI items whose
+			// UiDrawItem::Layer is <= L, so those layers are blurred with the scene and the
+			// higher layers are drawn sharp over it. Applies even when no UI is drawn.
+			std::optional<std::int32_t> AfterUiLayer;
+		};
+
+		ScreenBlurSettings Blur{};
 		Swim::Render::TemporalSettings Temporal{};
 		Swim::Render::ScreenSpaceSettings ScreenSpace{};
 		Swim::Render::PostProcessSettings Post{};
@@ -144,6 +183,7 @@ namespace Engine
 		std::uint32_t DirectionalLights = 0;
 		std::uint32_t LocalLights = 0;
 		std::uint32_t ShadowViews = 0;
+		std::uint32_t ShadowViewsRendered = 0; // Shadow views re-rendered this frame (the rest reuse the cache).
 		std::uint32_t ShadowCasters = 0;
 		std::uint32_t ParticleEmitters = 0;
 		std::uint32_t SkinnedInstances = 0;
@@ -160,6 +200,9 @@ namespace Engine
 		std::uint32_t PlanarCandidates = 0;		// Reflector faces considered (before culling and merging).
 		bool Presented = false;
 		std::uint64_t SkippedFrames = 0; // Minimized, out-of-date swapchain.
+		std::uint32_t MsaaSamples = 1;	 // Samples the scene geometry used this frame (RenderSettings::MsaaSamples, as supported).
+		bool SkyCubemap = false;		 // The sky background drew the FrameRenderer::SetSkyCubemap cube this frame.
+		std::uint32_t BlurLevels = 0;	 // Screen blur (RenderSettings::Blur) half-size levels this frame, 0 = off.
 
 		struct PassTiming
 		{

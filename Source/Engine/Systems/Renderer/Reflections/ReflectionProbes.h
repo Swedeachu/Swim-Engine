@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <utility>
 #include <vector>
 
 // Reflection probes (the local layer of the reflection hierarchy: screen-space
@@ -172,6 +173,21 @@ namespace Swim::Render::ReflectionProbes
 
 		std::vector<Slot> slots;
 
+		struct Candidate;
+		using RankedProbe = std::pair<float, std::uint32_t>; // Rank, probe index.
+
+		// Each ranked probe's slot (-1 for the others).
+		std::vector<std::int32_t> AssignSlots(std::span<const ReflectionProbeDesc> probes, std::span<const RankedProbe> ranked);
+
+		// The faces due a capture, most urgent first.
+		std::vector<Candidate> CollectCandidates(std::span<const ReflectionProbeDesc> probes, std::span<const RankedProbe> ranked,
+			std::span<const std::int32_t> slotOf, std::uint64_t frame, const ReflectionProbeSettings& settings,
+			std::span<const ReflectionProbeMover> movers);
+
+		// This frame's captures within budget (indices into candidates).
+		static std::vector<std::size_t> ChooseCandidates(const std::vector<Candidate>& candidates, std::size_t budget);
+
+		void CollectActive(Plan& plan, std::span<const RankedProbe> ranked, std::span<const std::int32_t> slotOf, double time) const;
 	};
 
 } // namespace Swim::Render::ReflectionProbes

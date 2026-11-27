@@ -3,6 +3,7 @@
 // its index in it (see Weather.h), so the field is stable in the world as the camera moves.
 // Instances [0, Grid.x) are falling particles, [Grid.x, Grid.x + Grid.w) splashes.
 
+#include "Resources/DrawIndex.slang"
 #include "Features/FeatureCommon.slang"
 #include "ForwardPlus/ForwardFrame.slang"
 
@@ -88,8 +89,10 @@ VertexOutput Emit(float3 center, float3 axis, float3 side, float2 corner, float 
 }
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instance : SV_VulkanInstanceID)
+VertexOutput vertexMain(uint vertexIdInput : SWIM_VERTEX_INDEX, uint instanceInput : SWIM_INSTANCE_INDEX SWIM_DRAW_BASE_PARAMETERS)
 {
+	const uint vertexId = DrawVertexIndex(vertexIdInput);
+	const uint instance = DrawInstanceIndex(instanceInput);
 	const float3 camera = Constants.CameraTime.xyz;
 	const float time = Constants.CameraTime.w;
 	const float2 corner = QuadCorners[vertexId % 6u];

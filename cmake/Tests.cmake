@@ -309,6 +309,13 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
 	endif()
 
+	if(SWIM_D3D12_RHI_AVAILABLE)
+		swim_collect_test_suite_sources(SWIM_D3D12_RHI_SUITES RHID3D12)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_D3D12_RHI_SUITES})
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_D3D12_RHI_SOURCES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES ${SWIM_D3D12_RHI_PRIVATE_LIBS})
+	endif()
+
 	if(SWIM_PHYSX_BACKEND_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_PHYSX_SUITES Physics/PhysX)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_PHYSX_SUITES})
@@ -375,6 +382,9 @@ function(swim_configure_tests)
 			SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
 			SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
 			SWIM_TEST_ASSET_ROOT="${PROJECT_SOURCE_DIR}/Assets"
+			# The engine sources compiled in read the repository's Assets/ (fonts, scenes), like a
+			# development engine build: no copied Assets/ folder next to the test binary.
+			SWIM_DEVELOPMENT_ASSET_ROOT="${PROJECT_SOURCE_DIR}/Assets"
 			$<$<CONFIG:Debug>:_SWIM_DEBUG>
 		)
 		if(SWIM_TEST_DECODES_AUDIO)
@@ -384,11 +394,15 @@ function(swim_configure_tests)
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		target_compile_definitions(SwimTests PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
 	endif()
+	if(SWIM_D3D12_RHI_AVAILABLE)
+		target_compile_definitions(SwimTests PRIVATE ${SWIM_D3D12_RHI_PRIVATE_DEFINITIONS})
+	endif()
 
 	if(TARGET SwimRhiSmokeShaders)
 		add_dependencies(SwimTests SwimRhiSmokeShaders)
 		target_compile_definitions(SwimTests PRIVATE
 			SWIM_RHI_TRIANGLE_SPIRV_PATH="${SwimRhiTriangle_SPIRV}"
+			SWIM_RHI_TRIANGLE_REFLECTION_PATH="${SwimRhiTriangle_REFLECTION}"
 			SWIM_RHI_PUSH_CONSTANTS_SPIRV_PATH="${SwimRhiPushConstants_SPIRV}"
 			SWIM_RHI_PUSH_CONSTANTS_REFLECTION_PATH="${SwimRhiPushConstants_REFLECTION}"
 			SWIM_RHI_COMPUTE_SPIRV_PATH="${SwimRhiCompute_SPIRV}"
@@ -412,6 +426,7 @@ function(swim_configure_tests)
 			SWIM_RHI_STORAGE_TEXTURE_SPIRV_PATH="${SwimRhiStorageTexture_SPIRV}"
 			SWIM_RHI_STORAGE_TEXTURE_REFLECTION_PATH="${SwimRhiStorageTexture_REFLECTION}"
 			SWIM_RHI_VERTEX_INPUT_SPIRV_PATH="${SwimRhiVertexInput_SPIRV}"
+			SWIM_RHI_VERTEX_INPUT_REFLECTION_PATH="${SwimRhiVertexInput_REFLECTION}"
 			SWIM_RHI_TEXTURE_SPIRV_PATH="${SwimRhiTexture_SPIRV}"
 			SWIM_RHI_TEXTURE_REFLECTION_PATH="${SwimRhiTexture_REFLECTION}"
 			SWIM_RHI_BINDLESS_SPIRV_PATH="${SwimRhiBindless_SPIRV}"
@@ -463,6 +478,8 @@ function(swim_configure_tests)
 			SWIM_FORWARD_TRANSPARENT_SORT_REFLECTION_PATH="${SwimForwardTransparentSort_REFLECTION}"
 			SWIM_SHADOW_DEPTH_SPIRV_PATH="${SwimShadowDepth_SPIRV}"
 			SWIM_SHADOW_DEPTH_REFLECTION_PATH="${SwimShadowDepth_REFLECTION}"
+			SWIM_SHADOW_CLEAR_SPIRV_PATH="${SwimShadowClear_SPIRV}"
+			SWIM_SHADOW_CLEAR_REFLECTION_PATH="${SwimShadowClear_REFLECTION}"
 			SWIM_SHADOW_MASKED_SPIRV_PATH="${SwimShadowMasked_SPIRV}"
 			SWIM_SHADOW_MASKED_REFLECTION_PATH="${SwimShadowMasked_REFLECTION}"
 			SWIM_POST_HISTOGRAM_SPIRV_PATH="${SwimPostHistogram_SPIRV}"
@@ -501,6 +518,28 @@ function(swim_configure_tests)
 			SWIM_SKINNING_REFLECTION_PATH="${SwimSkinning_REFLECTION}"
 			SWIM_UI_QUAD_SPIRV_PATH="${SwimUiQuad_SPIRV}"
 			SWIM_UI_QUAD_REFLECTION_PATH="${SwimUiQuad_REFLECTION}"
+		)
+	endif()
+
+	# DXIL of every Slang program: the D3D12 smokes run each Vulkan smoke's programs.
+	if(TARGET SwimRhiSmokeShaders AND SWIM_D3D12_RHI_AVAILABLE AND DEFINED SwimRhiCompute_DXIL)
+		get_property(SWIM_TEST_DXIL_OUTPUTS GLOBAL PROPERTY SWIM_SLANG_DXIL_OUTPUTS)
+		add_custom_target(SwimRhiSmokeDxil DEPENDS ${SWIM_TEST_DXIL_OUTPUTS})
+		swim_set_solution_folder(SwimRhiSmokeDxil "${SWIM_SOLUTION_FOLDER_TESTS}")
+		add_dependencies(SwimTests SwimRhiSmokeDxil)
+		target_compile_definitions(SwimTests PRIVATE
+			SWIM_RHI_TRIANGLE_DXIL_PATH="${SwimRhiTriangle_DXIL}"
+			SWIM_RHI_TRIANGLE_DXIL_REFLECTION_PATH="${SwimRhiTriangle_DXIL_REFLECTION}"
+			SWIM_RHI_PUSH_CONSTANTS_DXIL_PATH="${SwimRhiPushConstants_DXIL}"
+			SWIM_RHI_PUSH_CONSTANTS_DXIL_REFLECTION_PATH="${SwimRhiPushConstants_DXIL_REFLECTION}"
+			SWIM_RHI_COMPUTE_DXIL_PATH="${SwimRhiCompute_DXIL}"
+			SWIM_RHI_COMPUTE_DXIL_REFLECTION_PATH="${SwimRhiCompute_DXIL_REFLECTION}"
+			SWIM_RHI_STORAGE_TEXTURE_DXIL_PATH="${SwimRhiStorageTexture_DXIL}"
+			SWIM_RHI_STORAGE_TEXTURE_DXIL_REFLECTION_PATH="${SwimRhiStorageTexture_DXIL_REFLECTION}"
+			SWIM_RHI_BINDLESS_DXIL_PATH="${SwimRhiBindless_DXIL}"
+			SWIM_RHI_BINDLESS_DXIL_REFLECTION_PATH="${SwimRhiBindless_DXIL_REFLECTION}"
+			SWIM_RHI_VERTEX_INPUT_DXIL_PATH="${SwimRhiVertexInput_DXIL}"
+			SWIM_RHI_VERTEX_INPUT_DXIL_REFLECTION_PATH="${SwimRhiVertexInput_DXIL_REFLECTION}"
 		)
 	endif()
 

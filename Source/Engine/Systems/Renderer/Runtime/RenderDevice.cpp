@@ -5,6 +5,10 @@
 #include "Engine/Platform/Window.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 
+#if defined(SWIM_RHI_D3D12)
+#include "Engine/Systems/Renderer/RHI/Backends/D3D12/D3D12RhiBackend.h"
+#endif
+
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -95,6 +99,102 @@ namespace Engine
 			return text;
 		}
 
+		// The graphics system of one API with its backends registered; null when the API is not
+		// built into this engine.
+		std::unique_ptr<Swim::Rhi::GraphicsSystem> CreateGraphicsSystem(
+			Swim::Rhi::GraphicsApi api, const Swim::Rhi::GraphicsSystemDesc& desc)
+		{
+			Swim::Rhi::GraphicsFactory factory;
+			Swim::RhiVulkan::RegisterGraphicsBackend(factory);
+#if defined(SWIM_RHI_D3D12)
+			Swim::RhiD3D12::RegisterGraphicsBackend(factory);
+#endif
+			return factory.Create(api, desc);
+		}
+
+		// Among the adapters with bindless descriptors (the renderer's hard requirement), the
+		// one RenderDeviceDesc::Adapter asks for; UINT32_MAX when none has them.
+		std::uint32_t ChooseAdapter(Swim::Rhi::GraphicsSystem& graphics, const std::string& requested,
+			const std::optional<std::array<std::uint8_t, 8>>& displayLuid)
+		{
+			const std::string wanted = Lower(requested.empty() ? std::string("auto") : requested);
+			const auto drivesDisplay = [&](const Swim::Rhi::AdapterInfo& info)
+			{
+				return displayLuid && info.LuidValid && info.Luid == *displayLuid;
+			};
+			const auto pick = [&](auto&& accept)
+			{
+				for (std::uint32_t i = 0; i < graphics.GetAdapterCount(); ++i)
+				{
+					const auto& info = graphics.GetAdapter(i).GetInfo();
+
+					if (info.Capabilities.BindlessDescriptors && accept(i, info))
+					{
+						return i;
+					}
+				}
+
+				return UINT32_MAX;
+			};
+			std::uint32_t chosen = UINT32_MAX;
+
+			if (wanted == "auto")
+			{
+				chosen = pick(
+					[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+					{
+						return info.Discrete && drivesDisplay(info);
+					});
+				chosen = chosen != UINT32_MAX ? chosen
+											  : pick(
+													[](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+													{
+														return info.Discrete;
+													});
+			}
+			else if (wanted == "display")
+			{
+				chosen = pick(
+					[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+					{
+						return drivesDisplay(info);
+					});
+			}
+			else if (wanted == "discrete" || wanted == "integrated")
+			{
+				const bool discrete = wanted == "discrete";
+				chosen = pick(
+					[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+					{
+						return discrete ? info.Discrete : info.Integrated;
+					});
+			}
+			else
+			{
+				chosen = pick(
+					[&](std::uint32_t i, const Swim::Rhi::AdapterInfo& info)
+					{
+						return std::to_string(i) == wanted || Lower(info.Name).find(wanted) != std::string::npos;
+					});
+			}
+
+			if (chosen == UINT32_MAX)
+			{
+				if (wanted != "auto")
+				{
+					std::cout << "[Render] no adapter matches \"" << requested << "\"; using the default\n";
+				}
+
+				chosen = pick(
+					[](std::uint32_t, const Swim::Rhi::AdapterInfo&)
+					{
+						return true;
+					});
+			}
+
+			return chosen;
+		}
+
 	} // namespace
 
 	RenderDevice::RenderDevice(const RenderDeviceDesc& desc)
@@ -103,98 +203,53 @@ namespace Engine
 		Swim::Rhi::GraphicsSystemDesc systemDesc;
 		systemDesc.Validation = desc.Validation ? Swim::Rhi::ValidationMode::IfAvailable : Swim::Rhi::ValidationMode::Disabled;
 		systemDesc.EchoDiagnostics = true;
-		graphics = Swim::RhiVulkan::CreateGraphicsSystem(systemDesc);
-
-		if (!graphics || graphics->GetAdapterCount() == 0)
-		{
-			throw std::runtime_error("RenderDevice: no Vulkan adapter is available");
-		}
-
-		// Among the adapters with bindless descriptors (the renderer's hard requirement), the
-		// one RenderDeviceDesc::Adapter asks for.
 		const auto displayLuid = DisplayAdapterLuid(window);
-		const std::string wanted = Lower(desc.Adapter.empty() ? std::string("auto") : desc.Adapter);
-		const auto drivesDisplay = [&](const Swim::Rhi::AdapterInfo& info)
-		{
-			return displayLuid && info.LuidValid && info.Luid == *displayLuid;
-		};
-		const auto pick = [&](auto&& accept)
-		{
-			for (std::uint32_t i = 0; i < graphics->GetAdapterCount(); ++i)
-			{
-				const auto& info = graphics->GetAdapter(i).GetInfo();
 
-				if (info.Capabilities.BindlessDescriptors && accept(i, info))
+		// The requested API, then Vulkan when that one is not built in or fails to start.
+		for (const auto api : { desc.Api, Swim::Rhi::GraphicsApi::Vulkan })
+		{
+			try
+			{
+				graphics = CreateGraphicsSystem(api, systemDesc);
+
+				if (!graphics || graphics->GetAdapterCount() == 0)
 				{
-					return i;
+					throw std::runtime_error(std::string(graphics ? "no adapter is available" : "not built into this engine"));
 				}
+
+				const auto chosen = ChooseAdapter(*graphics, desc.Adapter, displayLuid);
+
+				if (chosen == UINT32_MAX)
+				{
+					throw std::runtime_error("no adapter supports bindless descriptors");
+				}
+
+				auto& adapter = graphics->GetAdapter(chosen);
+				device = adapter.CreateDevice();
+
+				if (!device)
+				{
+					throw std::runtime_error("device creation failed on " + adapter.GetInfo().Name);
+				}
+
+				adapterInfo = &adapter.GetInfo();
+				break;
 			}
-
-			return UINT32_MAX;
-		};
-		std::uint32_t chosen = UINT32_MAX;
-
-		if (wanted == "auto")
-		{
-			chosen = pick(
-				[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
-				{
-					return info.Discrete && drivesDisplay(info);
-				});
-			chosen = chosen != UINT32_MAX ? chosen
-										  : pick(
-												[](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
-												{
-													return info.Discrete;
-												});
-		}
-		else if (wanted == "display")
-		{
-			chosen = pick(
-				[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
-				{
-					return drivesDisplay(info);
-				});
-		}
-		else if (wanted == "discrete" || wanted == "integrated")
-		{
-			const bool discrete = wanted == "discrete";
-			chosen = pick(
-				[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
-				{
-					return discrete ? info.Discrete : info.Integrated;
-				});
-		}
-		else
-		{
-			chosen = pick(
-				[&](std::uint32_t i, const Swim::Rhi::AdapterInfo& info)
-				{
-					return std::to_string(i) == wanted || Lower(info.Name).find(wanted) != std::string::npos;
-				});
-		}
-
-		if (chosen == UINT32_MAX)
-		{
-			if (wanted != "auto")
+			catch (const std::exception& error)
 			{
-				std::cout << "[Render] no adapter matches \"" << desc.Adapter << "\"; using the default\n";
-			}
+				device.reset();
+				graphics.reset();
 
-			chosen = pick(
-				[](std::uint32_t, const Swim::Rhi::AdapterInfo&)
+				if (api == Swim::Rhi::GraphicsApi::Vulkan)
 				{
-					return true;
-				});
+					throw std::runtime_error(std::string("RenderDevice: ") + std::string(Swim::Rhi::ToString(api)) + ": " + error.what());
+				}
+
+				std::cerr << "[Render] " << Swim::Rhi::ToString(api) << " is unavailable (" << error.what()
+						  << "); falling back to Vulkan\n";
+			}
 		}
 
-		if (chosen == UINT32_MAX)
-		{
-			throw std::runtime_error("RenderDevice: no adapter supports bindless descriptors");
-		}
-
-		auto& adapter = graphics->GetAdapter(chosen);
-		adapterInfo = &adapter.GetInfo();
 		presentStats.Async = asyncPresent;
 		deferPresent = asyncPresent && desc.DeferPresent;
 		presentStats.Deferred = deferPresent;
@@ -203,12 +258,6 @@ namespace Engine
 			(desc.SplitPresent == RenderDeviceDesc::Split::On ||
 				(desc.SplitPresent == RenderDeviceDesc::Split::Auto && presentStats.CrossAdapter));
 		presentStats.Split = splitPresent;
-		device = adapter.CreateDevice();
-
-		if (!device)
-		{
-			throw std::runtime_error("RenderDevice: device creation failed on " + adapterInfo->Name);
-		}
 
 		const std::uint32_t slots = std::clamp(desc.FramesInFlight, 1u, 2u);
 

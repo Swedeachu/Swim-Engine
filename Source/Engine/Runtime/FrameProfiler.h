@@ -93,7 +93,7 @@ namespace Engine
 		// The costliest `top` zones of each category.
 		static std::string Summary(const Report& report, std::size_t top = 12);
 
-		// The current frame's zones (for overlays).
+		// The current frame's zones; filled only on measured capture frames.
 		const std::unordered_map<std::string, double>& GetFrame() const { return frame; }
 
 	  private:

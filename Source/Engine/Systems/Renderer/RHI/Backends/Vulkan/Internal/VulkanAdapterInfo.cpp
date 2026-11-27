@@ -85,6 +85,7 @@ namespace Swim::RhiVulkan
 		const auto& limits = properties.properties.limits;
 
 		Rhi::AdapterInfo info{};
+		info.Api = Rhi::GraphicsApi::Vulkan;
 		info.Name = properties.properties.deviceName;
 		info.DriverName = driver.driverName;
 		info.DriverInfo = driver.driverInfo;
@@ -137,6 +138,9 @@ namespace Swim::RhiVulkan
 		capabilities.MaxTextureArrayLayers = limits.maxImageArrayLayers;
 		capabilities.MaxSamples = GetMaximumSampleCount(
 			limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts);
+		// VkSampleCountFlagBits equal the counts; 32 and 64 are outside Rhi::SampleCount.
+		capabilities.SampleCounts = (limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts &
+			limits.sampledImageColorSampleCounts & limits.sampledImageDepthSampleCounts & 0x1Fu) | 1u;
 		capabilities.SubgroupSize = subgroupProperties.subgroupSize;
 		capabilities.MinUniformBufferOffsetAlignment = limits.minUniformBufferOffsetAlignment;
 		capabilities.MinStorageBufferOffsetAlignment = limits.minStorageBufferOffsetAlignment;

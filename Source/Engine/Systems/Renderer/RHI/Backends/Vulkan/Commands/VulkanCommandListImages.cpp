@@ -125,12 +125,21 @@ namespace Swim::RhiVulkan
 			throw std::invalid_argument("Vulkan image copy requires distinct matching textures with transfer usage");
 		}
 
-		GetColorTexelBytes(sourceDesc.PixelFormat);
+		// Depth-only images copy their depth aspect (whole-image regions are not required for
+		// non-stencil depth); everything else must be an uncompressed colour format.
+		const bool depth = Rhi::IsDepthFormat(sourceDesc.PixelFormat) && !Rhi::HasStencil(sourceDesc.PixelFormat);
+
+		if (!depth)
+		{
+			GetColorTexelBytes(sourceDesc.PixelFormat);
+		}
+
 		ValidateCopyExtent(sourceDesc, region.Source, region.SourceOffset, region.Extent);
 		ValidateCopyExtent(destinationDesc, region.Destination, region.DestinationOffset, region.Extent);
+		const VkImageAspectFlags aspect = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 		VkImageCopy copy{};
-		copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, region.Source.MipLevel, region.Source.ArrayLayer, 1 };
-		copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, region.Destination.MipLevel, region.Destination.ArrayLayer, 1 };
+		copy.srcSubresource = { aspect, region.Source.MipLevel, region.Source.ArrayLayer, 1 };
+		copy.dstSubresource = { aspect, region.Destination.MipLevel, region.Destination.ArrayLayer, 1 };
 		copy.srcOffset = { region.SourceOffset.X, region.SourceOffset.Y, region.SourceOffset.Z };
 		copy.dstOffset = { region.DestinationOffset.X, region.DestinationOffset.Y, region.DestinationOffset.Z };
 		copy.extent = { region.Extent.Width, region.Extent.Height, region.Extent.Depth };

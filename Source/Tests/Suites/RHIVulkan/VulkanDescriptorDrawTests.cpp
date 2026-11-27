@@ -49,13 +49,14 @@ SWIM_TEST("RHI.Vulkan.Descriptors", "DrawRequiresCompleteTablesAndRecordedTables
 	SWIM_CHECK_EQUAL(capture.DrawCount, 1u);
 	SWIM_CHECK_EQUAL(capture.BoundSpace, 2u);
 	SWIM_CHECK_THROWS(table->Write({ &write, 1 }), std::logic_error);
+	// Binding a pipeline unbinds nothing: a table stays bound for a compatible layout.
 	commands.BindGraphicsPipeline(*pipeline);
-	SWIM_CHECK_THROWS(commands.Draw(3, 1, 0, 0), std::logic_error);
+	commands.Draw(3, 1, 0, 0);
 	commands.BindDescriptorTable(2, *table);
 	commands.Draw(3, 1, 0, 0);
 	commands.EndRendering();
 	commands.End();
-	SWIM_CHECK_EQUAL(capture.DrawCount, 2u);
+	SWIM_CHECK_EQUAL(capture.DrawCount, 3u);
 	// Pipeline retains native layout objects after public creation objects go away.
 	table.reset();
 	layout.reset();
