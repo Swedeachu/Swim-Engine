@@ -54,6 +54,7 @@ The engine has no global lighting-tier setting today. Quality is spread over man
 
 - A tier is a **preset**. Choosing it writes the individual flags. Changing a flag afterwards is allowed and shows the tier as "Custom" in tools.
 - *Optional, later (M11):* Enhanced may use the same acceleration structures for traced sun shadows or traced reflections, as hybrid options. They are listed as stretch work, not as part of the core plan.
+- *Optional, later (M11):* Enhanced may gain diffuse GI from radiance cascades traced through voxel occupancy, which needs no RT hardware (section 5.6.1).
 
 ### 1.4 Performance targets
 
@@ -593,12 +594,38 @@ Light sources in this scene class:
 | **SHaRC** (spatially hashed radiance cache) [R27][R28] | compute only, any DXR GPU, DX12 + Vulkan, small; shipped in AAA path tracers (it appears as `SharcUpdate` in [R36]) | some bias and light leaking at coarse levels; needs an update pass | **default** from M5 |
 | **NRC** (neural radiance cache) [R27][R48] | higher quality on glossy and complex light; fewer update rays | RTX + tensor cores; experimental in RTXGI 2.x; adds a training dispatch; memory | **M8 experiment** on RTX only; keep it if it wins on image quality at equal cost |
 | FSR Radiance Caching (preview) [R57] | AMD equivalent | RX 9000 + DX12 only, preview | track; not planned |
+| **Radiance cascades** (world-space, split variant) [R71][R72] | diffuse GI with little noise and no light-count cost; any GPU with ray queries, or none with a voxel tracer | diffuse only; new for 3D; no published 3D cost or memory numbers | **M8 spike** next to NRC (section 5.6.1); also a candidate non-RT GI for Enhanced |
 
 **SHaRC in this scene:**
 
 - **Update:** a stride of ~1 in 24 pixels (≈ 4%) traces a longer path (up to 4 bounces) and writes radiance into the hash grid cells it crosses. **Resolve** merges and ages entries. **Query:** path vertices from bounce 2 onward (or bounce 1 when the cone footprint is larger than the cell) read the cache and terminate.
 - **Hash key:** position quantised with a level of detail chosen by distance to the camera, plus the surface normal's major axis. Including the normal is important for voxel worlds, where 1 m walls with light on one side only are common.
 - **Capacity** 4M entries (64 MB), camera-centred. Entries are reset on large block edits in their cells (the edit list already exists for BLAS rebuilds).
+
+#### 5.6.1 Radiance cascades
+
+**What it is.** Radiance cascades (RC) [R71] store radiance in several probe grids ("cascades"). Each cascade covers a longer distance interval than the one before it, with fewer probes but more directions per probe. Near the probe, light changes quickly in space and slowly in direction; far away, it is the other way round. Each cascade traces only its own short interval, and the cascades are then merged from far to near into one irradiance field. The total work is roughly constant per cascade, so the cost does not grow with the number of lights. Every emissive surface is lit at no extra cost.
+
+**Where it is proven.** It is well proven in 2D and in screen space; one shipped title uses screen-space RC for its GI [R73]. 3D world space is newer. *Split Radiance Cascades* [R72] (2026) is the first 3D world-space form aimed at real time. It keeps sparse probes in a hash map, traces rays from the visible surfaces, and splits each ray into the cascade intervals its hit distance covers. That paper covers diffuse light only. The theses in [R74] combine screen-space RC with other methods and report that dense 3D probe grids are memory-heavy, which is the problem the sparse split form addresses.
+
+**What it would buy us:**
+
+- **Diffuse GI with little noise.** The merge step filters spatially, so RC output needs far less temporal accumulation than one-sample-per-pixel path tracing. That eases the load on RR/NRD for diffuse light and reduces ghosting after block edits.
+- **Emissive-heavy scenes.** Caves full of glowing blocks, lava and torches cost the same as a lit plain.
+- **A voxel world suits it.** Block occupancy is already a coarse acceleration structure. A world-space RC can trace with a DDA through a per-section occupancy volume, with no BLAS at all.
+
+**What it does not buy us:**
+
+- **Diffuse only.** Glossy reflections, mirrors, refraction and direct shadows still need the integrator (ReSTIR DI/GI/PT, section 5.3–5.7). In the Path traced tier, RC can only replace the diffuse part of the radiance cache. It is an alternative to SHaRC and NRC, not to path tracing.
+- **No 3D numbers yet.** [R72] gives no cost or memory figures that we could check, and no title ships a 3D world-space version. Any perf claim must come from our own spike on the laptop 4070.
+- **Known artifacts.** Merging intervals can ring or leak light near thin occluders, and voxel worlds are full of 1-block walls. Screen-space RC misses light from off-screen surfaces.
+
+**Plan:**
+
+1. **Path traced tier, M8 spike.** Build split RC as an optional diffuse cache: hardware ray queries from G-buffer surfaces, sparse probes in a hash map that shares SHaRC's camera-centred key scheme (position LOD plus normal major axis, section 5.6), and edit invalidation from the same edit list. Compare it with SHaRC and NRC at equal GPU time, using FLIP against the M3 reference plus noise and ghosting under RR. Adopt it only if it wins in at least the cave/emissive and interior stress scenes. Otherwise SHaRC stays the default.
+2. **Enhanced tier, M11 candidate.** This is the more promising use. RC can give the raster tier real diffuse GI from the sky and emissive blocks without RT hardware: world-space RC traced through a voxel occupancy volume, optionally with screen-space RC for small detail. It would replace "GTAO + IBL + probes" for indirect light when enabled. Target cost ≤ 2.0 ms at 1080p on the laptop 4070, a target to measure, not a promise. This needs your answer to open question 13 first.
+
+Neither use blocks any earlier milestone, and nothing in sections 3–4 changes for it.
 
 ### 5.7 Specular, reflections and mirrors
 
@@ -926,10 +953,10 @@ Ordered, D3D12 first. Each milestone ends with its smokes passing on D3D12 (stri
 | **M5** | Real-time integrator (first playable) | raster G-buffer + translucent layer, light BVH + presampled tiles + ReGIR, ReSTIR DI, 1-path indirect with SHaRC termination, NRD (ReBLUR + SIGMA) + engine TAA (native res) as the first reconstruction, tier setting (no live switching polish yet) | path-traced look on all stress scenes; soft shadows from all lights and emissive blocks; no boiling on static walls at native 1080p | ≤ 40 ms at **native 1080p** (no upscale) in the cave/emissive scene; per-pass budgets tracked | ReSTIR tuning; NRD tuning on voxel edges; light BVH build cost with many emissive clusters |
 | **M6** | DLSS SR + RR via Streamline | backend-internal Streamline integration (`Rhi::Reconstruction`), guide buffers per 6.2, PSR for mirrors/water/glass, jitter policy, resolution modes, history resets | RR output ≥ NRD output on FLIP vs reference in 6/8 stress scenes; mirrors and water stable under camera motion | **Floor met: ≤ 33.3 ms** at 1080p from 540p in every stress scene | interposer vs RHI ownership; guide-buffer conventions (motion sign, depth); RR on stylised low-texel content |
 | **M7** | Translucency, volumetrics, particles, features | 2-interface glass/water paths, underwater medium, froxel volumetrics with traced sun, particle/weather transparency layer with ReGIR + cache lighting, overlay lighting, feature migrations (8.5), cloud transmittance map | glass houses, aquariums, rain at night with lights, explosions; coloured shadows through stained glass | Floor still met with all on; volumetrics ≤ 1.0 ms | translucent denoising; RR transparency guides; cost creep |
-| **M8** | ReSTIR GI → ReSTIR PT, NRC trial | ReSTIR GI (M8a), ReSTIR PT with hybrid shift + decorrelation (M8b), unified DI+GI if available [R46], NRC experiment on RTX | GI noise visibly lower at equal time; glossy inter-reflections stable | Goal trending: ≤ 25 ms at 720p internal | correlation artifacts under RR; ReSTIR PT cost at 4070 laptop scale |
+| **M8** | ReSTIR GI → ReSTIR PT, NRC trial | ReSTIR GI (M8a), ReSTIR PT with hybrid shift + decorrelation (M8b), unified DI+GI if available [R46], NRC experiment on RTX, radiance cascades diffuse-cache spike (5.6.1) | GI noise visibly lower at equal time; glossy inter-reflections stable | Goal trending: ≤ 25 ms at 720p internal | correlation artifacts under RR; ReSTIR PT cost at 4070 laptop scale |
 | **M9** | Productisation and performance | live tier switching (8.6), settings and console, memory-pressure policy, far-field LOD BLAS, auto resolution, FSR/XeSS/TAAU fallbacks, frame generation (optional), async compute (if the queue work landed), budget pass to section 1.5 | no hitches > 250 ms on first switch, none afterwards; all features usable in tier | **Goal met: ≤ 20 ms** at 1080p in the typical scene, Floor in every stress scene; VRAM added ≤ 1.3 GB | 8 GB VRAM pressure; thermals and TGP variance between laptops |
 | **M10** | Vulkan parity | Vulkan AS/pipelines/SBT/SER (EXT, NV fallback)/OMM, Streamline Vulkan, NRD/RTXDI/SHaRC on Vulkan | the same images as D3D12 (FLIP ≤ 0.02 mean in reference mode) | within 10% of D3D12 GPU time | extension availability per driver; Streamline Vulkan hooks vs the engine's WSI layer |
-| **M11** | Bleeding edge (as retail support lands) | partitioned TLAS (section regions), clustered BLAS for voxel sections if it beats compaction, position fetch to drop duplicate positions, volumetric ReSTIR, DLSS 4.5 RR presets, hybrid RT options for Enhanced (traced sun shadows/reflections), work-graph experiments | no regressions | TLAS maintenance ≤ 0.3 ms with edits; AS memory −30% | preview APIs change [R6]; vendor coverage |
+| **M11** | Bleeding edge (as retail support lands) | partitioned TLAS (section regions), clustered BLAS for voxel sections if it beats compaction, position fetch to drop duplicate positions, volumetric ReSTIR, DLSS 4.5 RR presets, hybrid RT options for Enhanced (traced sun shadows/reflections), radiance cascades diffuse GI for Enhanced without RT hardware (5.6.1), work-graph experiments | no regressions | TLAS maintenance ≤ 0.3 ms with edits; AS memory −30% | preview APIs change [R6]; vendor coverage |
 
 ### 10.2 Stress scenes (generic sandbox bookmarks to add)
 
@@ -1011,6 +1038,7 @@ Each scene has a fixed camera path for repeatable timing and FLIP captures again
 10. **Hybrid options in Enhanced:** should Enhanced gain traced sun shadows or reflections using the same acceleration structures (M11), or stay pure raster?
 11. **Particles in the BVH:** is "particles are lit but do not cast or reflect" acceptable for v1?
 12. **Ownership of RT geometry:** should the engine ship a reusable "voxel section" RT helper module (generic, as planned in 8.4), or should the application own all of its RT meshing and only use the low-level `RtGeometryContext`?
+13. **Radiance cascades for Enhanced:** is non-RT diffuse GI for the raster tier wanted (section 5.6.1)? If so, should it come before the Path traced tier work, since it would reach every GPU and does not wait on SDK approvals?
 
 ---
 
@@ -1108,3 +1136,8 @@ All links accessed 2026-11-27. Talks marked † have no public recording or slid
 - [R68] PIX on Windows: <https://devblogs.microsoft.com/pix/>
 - [R69] NVIDIA Nsight Graphics: <https://developer.nvidia.com/nsight-graphics>
 - [R70] NVIDIA Nsight Aftermath: <https://developer.nvidia.com/nsight-aftermath>
+- [R71] A. Sannikov, *Radiance Cascades: A Novel Approach to Calculating Global Illumination* (2023); overview: <https://80.lv/articles/radiance-cascades-new-approach-to-calculating-global-illumination>
+- [R72] Freeman, Sannikov, Pitt-Francis, *Split Radiance Cascades* (2026, 3D world-space diffuse GI): <https://arxiv.org/abs/2607.20384>
+- [R73] Screen-space radiance cascades in a shipped title (2023 conference talk; ~3 ms reported, unverified): <https://www.youtube.com/watch?v=TrHHTQqmAaM>
+- [R74] Chalmers master's theses on screen-space radiance cascades: <https://odr.chalmers.se/items/9e42007a-bb60-440f-ba28-04410822758f/full>
+- [R75] Holographic Radiance Cascades (2025, 2D): <https://arxiv.org/abs/2505.02041>
