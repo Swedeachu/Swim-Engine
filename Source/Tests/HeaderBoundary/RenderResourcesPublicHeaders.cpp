@@ -94,12 +94,12 @@ static_assert(Swim::Render::ForwardPlusRenderer::NormalFormat == Swim::Rhi::Form
 	Swim::Render::ForwardPlusRenderer::IndirectFormat == Swim::Rhi::Format::RGBA16Float);
 static_assert(Swim::Render::ForwardPlusRenderer::ReflectanceFormat == Swim::Rhi::Format::RGBA16Float &&
 	Swim::Render::ForwardPlusRenderer::SpecularFormat == Swim::Rhi::Format::RGBA16Float);
-static_assert(sizeof(Swim::Render::GpuScreenSpaceParams) == 432 && Swim::Render::ScreenSpaceCompositeBindings::Count == 17 &&
+static_assert(sizeof(Swim::Render::GpuScreenSpaceParams) == 448 && Swim::Render::ScreenSpaceCompositeBindings::Count == 17 &&
 	Swim::Render::ScreenSpaceReflectionBindings::Count == 11);
 static_assert(Swim::Render::MaxAoSlices == 4 && Swim::Render::MaxAoSteps == 8);
 static_assert(Swim::Render::MaxReflectionSteps == 256 && Swim::Render::MaxReflectionRefineSteps == 8);
 static_assert(!std::is_copy_constructible_v<Swim::Render::ParticleSystem>);
-static_assert(sizeof(Swim::Render::GpuParticle) == 48 && sizeof(Swim::Render::GpuParticleEmitter) == 320 &&
+static_assert(sizeof(Swim::Render::GpuParticle) == 48 && sizeof(Swim::Render::GpuParticleEmitter) == 352 &&
 	sizeof(Swim::Render::GpuParticleFrame) == 128 && sizeof(Swim::Render::GpuParticleCounters) == 16);
 static_assert(Swim::Render::ParticleRenderBindings::BindlessSpace == Swim::Render::ForwardPlusDrawBindings::BindlessSpace);
 static_assert(!std::is_copy_constructible_v<Swim::Render::SkinningSystem>);

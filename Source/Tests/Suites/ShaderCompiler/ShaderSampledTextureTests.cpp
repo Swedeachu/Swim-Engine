@@ -82,7 +82,7 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "UnsupportedScalarShapeAndResultWidt
 
 		if (invalid == 1)
 		{
-			image.ResourceMultisample = true;
+			image.ResourceScalarType = "float64";
 		}
 
 		if (invalid == 2)

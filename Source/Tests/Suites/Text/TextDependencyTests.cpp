@@ -24,8 +24,8 @@ SWIM_TEST("Text.Dependencies", "FreeTypeInitializesAndRejectsNonFontData")
 	FT_Int patch = 0;
 	FT_Library_Version(library, &major, &minor, &patch);
 	SWIM_CHECK_EQUAL(major, 2);
-	SWIM_CHECK_EQUAL(minor, 14);
-	SWIM_CHECK_EQUAL(patch, 3);
+	SWIM_CHECK_EQUAL(minor, 15);
+	SWIM_CHECK_EQUAL(patch, 0);
 
 	// Every compiled-in driver refuses the bytes (which one answers, and with which
 	// format error, is FreeType's business).
